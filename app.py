@@ -1,12 +1,12 @@
 import streamlit as st
 import pandas as pd
-from st_gsheets_connection import GSheetsConnection
+from streamlit_gsheets import GSheetConnection
 import os
 from datetime import datetime, timedelta
 
 # --- CONFIGURACIÓN DE CONEXIÓN (NUEVO) ---
 # Esto reemplaza a SQLite para que funcione en la nube sin errores
-conn = st.connection("gsheets", type=GSheetsConnection)
+conn = st.connection("gsheets", type=GSheetConnection)
 
 def get_data(worksheet_name):
     return conn.read(worksheet=worksheet_name)
