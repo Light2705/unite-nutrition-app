@@ -24,7 +24,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS logs 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, date TEXT, 
                  food_desc TEXT, prot REAL, carb REAL, fat REAL, kcal REAL, status TEXT)''')
-    c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin123', 1, 0, 0, 0, 0, '2099-12-31')")
+    c.execute("INSERT OR IGNORE INTO users VALUES ('erick', 'erickale2005', 1, 0, 0, 0, 0, '2099-12-31')")
     conn.commit()
     conn.close()
 
