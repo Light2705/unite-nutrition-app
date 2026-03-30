@@ -22,13 +22,12 @@ except Exception as e:
 
 # --- FUNCIONES DE DATOS ---
 def get_data(worksheet_name):
-    # Usamos la URL directa para evitar el Error 400
-    return conn.read(spreadsheet=url_sheet, worksheet=worksheet_name)
-
-def save_data(df, worksheet_name):
-    # Para que esto funcione, el Excel DEBE estar compartido como EDITOR
-    conn.update(spreadsheet=url_sheet, worksheet=worksheet_name, data=df)
-    st.cache_data.clear()
+    # Forzamos que la URL termine en /export?format=csv
+    # Esto elimina cualquier error de "Bad Request" (400)
+    base_url = url_sheet.split('/edit')[0] # Limpiamos el final
+    clean_url = f"{base_url}/export?format=csv"
+    
+    return conn.read(spreadsheet=clean_url, worksheet=worksheet_name)
 
 # --- LÓGICA DE PERSISTENCIA ---
 if 'user' not in st.session_state:
