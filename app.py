@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from st_gsheets_connection import GSheetConnection
+from streamlit_gsheets import GSheetsConnection
 import os
 from datetime import datetime, timedelta
 
