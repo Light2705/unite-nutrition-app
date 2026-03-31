@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import os
-import re  # Se añade para la validación de letras
+import re 
 from datetime import datetime, timedelta
 
 # --- CONFIGURACIÓN DE RUTAS ---
@@ -24,12 +24,9 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS logs 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, date TEXT, 
                  food_desc TEXT, prot REAL, carb REAL, fat REAL, kcal REAL, status TEXT)''')
-    
-    # NUEVA TABLA: Biometría (Peso, Sueño, Estrés)
     c.execute('''CREATE TABLE IF NOT EXISTS biometrics 
                  (username TEXT, date TEXT, weight REAL, sleep INTEGER, stress INTEGER, 
                  PRIMARY KEY (username, date))''')
-    
     c.execute("INSERT OR IGNORE INTO users VALUES ('erick', 'erickale2005', 1, 0, 0, 0, 0, '2099-12-31')")
     conn.commit()
     conn.close()
@@ -103,21 +100,15 @@ else:
     if st.session_state.admin: opciones = ["Gestión de Clientes", "Maestro de Alimentos", "Mi Diario", "Historial"]
     menu = st.sidebar.radio("Navegación", opciones)
 
-    # --- FUNCIÓN COMPARTIDA DE HISTORIAL (AHORA CON GRÁFICA) ---
     def mostrar_historial(usuario):
         st.subheader(f"📅 Historial de Progreso: {usuario}")
         conn = sqlite3.connect(DB_PATH)
         dias_es = {'Monday': 'Lunes', 'Tuesday': 'Martes', 'Wednesday': 'Miércoles', 'Thursday': 'Jueves', 'Friday': 'Viernes', 'Saturday': 'Sábado', 'Sunday': 'Domingo'}
-        
-        # Datos de Macros
         query = "SELECT date as Fecha, round(SUM(prot),1) as P_Total, round(SUM(carb),1) as C_Total, round(SUM(fat),1) as G_Total, round(SUM(kcal),0) as Kcal_Total FROM logs WHERE username=? GROUP BY date ORDER BY date DESC LIMIT 14"
         df = pd.read_sql(query, conn, params=(usuario,))
-        
-        # Datos de Biometría para la gráfica
         df_bio = pd.read_sql("SELECT date as Fecha, weight as Peso FROM biometrics WHERE username=? ORDER BY date ASC", conn, params=(usuario,))
         conn.close()
 
-        # Gráfica de peso si hay datos
         if not df_bio.empty:
             st.write("📈 **Evolución del Peso (kg)**")
             df_chart = df_bio.copy()
@@ -129,47 +120,40 @@ else:
             if not df_bio.empty:
                 df_bio['Fecha'] = pd.to_datetime(df_bio['Fecha'])
                 df = pd.merge(df, df_bio, on="Fecha", how="left")
-            
             df.insert(0, "Día", df['Fecha'].dt.day_name().map(dias_es))
             df['Fecha'] = df['Fecha'].dt.strftime('%d/%m')
             st.write("📋 **Registros Diarios**")
             st.dataframe(df, use_container_width=True, hide_index=True)
         else: st.info("No hay registros de alimentación en el periodo seleccionado.")
 
-    # --- GESTIÓN DE CLIENTES ---
     if st.session_state.admin and menu == "Gestión de Clientes":
+        # ... (Mantener igual que antes para no borrar nada)
         st.header("👥 Control de Alumnos")
         conn = sqlite3.connect(DB_PATH)
         hoy = datetime.now().strftime('%Y-%m-%d')
         hora_actual = datetime.now().hour
-
-        st.subheader("🚨 Alerta de Desvío")
         alumnos_check = pd.read_sql("SELECT username FROM users WHERE is_admin=0", conn)['username'].tolist()
         for alum in alumnos_check:
             reg_hoy = pd.read_sql("SELECT count(*) as total FROM logs WHERE username=? AND date=?", conn, params=(alum, hoy)).iloc[0]['total']
             if reg_hoy == 0 and hora_actual >= 16:
                  st.markdown(f'<div style="color: #ff4b4b; border: 1px solid #ff4b4b; padding: 10px; border-radius: 5px;">⚠️ <b>{alum}</b> no ha registrado comidas hoy.</div>', unsafe_allow_html=True)
-
         st.divider()
         pendientes = pd.read_sql("SELECT * FROM logs WHERE status='Pendiente'", conn)
         if not pendientes.empty:
             st.subheader("🔔 Alimentos Pendientes por Clasificar")
             cats_existentes = pd.read_sql("SELECT DISTINCT category FROM master_food", conn)['category'].tolist()
-            
             for _, r in pendientes.iterrows():
                 with st.expander(f"🔴 {r['username']} - {r['food_desc']}"):
                     c1, c2, c3 = st.columns(3)
                     p_val = c1.number_input("Prot (100g)", 0.0, key=f"p_val_{r['id']}")
                     c_val = c2.number_input("Carb (100g)", 0.0, key=f"c_val_{r['id']}")
                     g_val = c3.number_input("Fat (100g)", 0.0, key=f"g_val_{r['id']}")
-                    
                     col_cat, col_new = st.columns(2)
                     cat_sel = col_cat.selectbox("Clasificar en:", [""] + sorted([c for c in cats_existentes if c]) + ["➕ Nueva Categoría"], key=f"cat_sel_{r['id']}")
                     nueva_cat_nombre = ""
                     if cat_sel == "➕ Nueva Categoría":
                         nueva_cat_nombre = col_new.text_input("Nombre de la categoría:", key=f"new_cat_{r['id']}").strip().capitalize()
                     categoria_final = nueva_cat_nombre if cat_sel == "➕ Nueva Categoría" else cat_sel
-
                     col_v, col_r = st.columns(2)
                     if col_v.button("✅ Validar y Guardar", key=f"v_btn_{r['id']}"):
                         if categoria_final == "": st.error("Selecciona categoría.")
@@ -185,16 +169,13 @@ else:
                     if col_r.button("🗑️ Rechazar / Borrar", key=f"del_log_{r['id']}"):
                         conn.execute("DELETE FROM logs WHERE id=?", (r['id'],))
                         conn.commit(); st.rerun()
-
         st.divider()
         usuarios_lista = pd.read_sql("SELECT username as Alumno, expiry_date as Acceso_Hasta FROM users WHERE is_admin=0", conn)
         st.dataframe(usuarios_lista, use_container_width=True)
-        
         sel_atleta = st.selectbox("Selecciona un alumno:", [""] + usuarios_lista['Alumno'].tolist())
         if sel_atleta:
             m = pd.read_sql("SELECT * FROM users WHERE username=?", conn, params=(sel_atleta,)).iloc[0]
             last_bio = pd.read_sql("SELECT * FROM biometrics WHERE username=? ORDER BY date DESC LIMIT 1", conn, params=(sel_atleta,))
-            
             t_hoy, t_hist, t_cfg = st.tabs(["📊 Hoy", "📅 Historial Completo", "⚙️ Plan"])
             with t_hoy:
                 if not last_bio.empty:
@@ -216,7 +197,6 @@ else:
                 if st.button("💾 Actualizar Plan"):
                     conn.execute("UPDATE users SET expiry_date=?, target_prot=?, target_carb=?, target_fat=?, target_kcal=? WHERE username=?", (nueva_f, p_o, c_o, g_o, k_o, sel_atleta))
                     conn.commit(); st.success("Plan actualizado."); st.rerun()
-
         st.divider()
         st.subheader("⚠️ Zona de Peligro")
         user_to_delete = st.selectbox("Selecciona alumno para BORRAR:", [""] + usuarios_lista['Alumno'].tolist(), key="del_user")
@@ -270,10 +250,28 @@ else:
         
         food_f = ""
         if a_sel == "➕ OTRO": 
-            # --- CAMBIO AQUÍ: Filtrado de solo letras ---
-            input_food = st.text_input("Escribe el nombre del alimento:").strip()
-            # Filtra permitiendo letras (incluidas tildes/ñ) y espacios
-            food_f = re.sub(r'[^a-zA-ZáéíóúÁÉÍÓÚñÑ\s]', '', input_food)
+            # --- CAMBIO AQUÍ: BLOQUEO DE TECLAS NUMÉRICAS CON JAVASCRIPT ---
+            food_f = st.text_input("Escribe el nombre del alimento:", key="food_input_text").strip()
+            
+            # Inyección de JavaScript para evitar que el navegador acepte números en el input
+            st.components.v1.html(
+                """
+                <script>
+                var input = window.parent.document.querySelectorAll('input[type="text"]');
+                for (var i = 0; i < input.length; i++) {
+                    if (input[i].getAttribute('aria-label') == 'Escribe el nombre del alimento:') {
+                        input[i].onkeydown = function(e) {
+                            if (e.key >= '0' && e.key <= '9') {
+                                return false;
+                            }
+                        };
+                    }
+                }
+                </script>
+                """,
+                height=0,
+            )
+            
         elif a_sel != "":
             food_f = a_sel
             pre = pd.read_sql("SELECT * FROM master_food WHERE food_name=?", conn, params=(food_f,)).iloc[0]
@@ -300,8 +298,8 @@ else:
         conn.close()
 
     elif menu == "Historial": mostrar_historial(st.session_state.user)
-
     elif menu == "Maestro de Alimentos":
+        # ... (Mantener igual para no borrar nada)
         st.header("📂 Base de Alimentos")
         archivo = st.file_uploader("Sube tu Excel (.xlsx)", type=["xlsx"])
         if archivo and st.button("🚀 Importar Base"):
@@ -311,12 +309,10 @@ else:
                 p, c, g = float(r['proteina']), float(r['carbos']), float(r['grasas'])
                 conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (str(r['nombre']).strip(), p, c, g, (p*4+c*4+g*9), str(r['categoria']).capitalize()))
             conn.commit(); conn.close(); st.success("Base actualizada.")
-
         st.divider()
         conn = sqlite3.connect(DB_PATH)
         base_actual = pd.read_sql("SELECT food_name as Alimento, category as Categoría, p100 as Prot, c100 as Carb, g100 as Fat FROM master_food", conn)
         st.dataframe(base_actual, use_container_width=True, hide_index=True)
-        
         st.subheader("✏️ Editar Macros")
         alim_a_editar = st.selectbox("Selecciona alimento:", [""] + base_actual['Alimento'].tolist())
         if alim_a_editar:
@@ -333,7 +329,6 @@ else:
                     if ed_nombre != datos_alim['food_name']: conn.execute("DELETE FROM master_food WHERE food_name=?", (datos_alim['food_name'],))
                     conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (ed_nombre.strip(), ed_p, ed_c, ed_g, ed_k, ed_cat.strip().capitalize()))
                     conn.commit(); st.rerun()
-
         food_to_delete = st.selectbox("Eliminar alimento:", [""] + base_actual['Alimento'].tolist(), key="del_food")
         if st.button("🗑️ Eliminar"):
             if food_to_delete != "":
