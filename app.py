@@ -4,8 +4,7 @@ import sqlite3
 import os
 from datetime import datetime, timedelta
 
-# --- CONFIGURACIÓN DE RUTAS INTELIGENTE ---
-# Detecta si está en la nube o local para evitar errores de ruta
+# --- CONFIGURACIÓN DE RUTAS ---
 if os.path.exists(os.path.join(os.path.expanduser("~"), "Downloads")):
     BASE_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
 else:
@@ -55,7 +54,6 @@ if 'user' not in st.session_state:
         p = st.text_input("Contraseña", type="password", key="login_p")
         if st.button("Entrar"):
             conn = sqlite3.connect(DB_PATH)
-            # Mejora: Consulta segura parametrizada
             res = pd.read_sql("SELECT * FROM users WHERE username=? AND password=?", conn, params=(u, p))
             conn.close()
             if not res.empty:
@@ -121,7 +119,11 @@ else:
         
         pendientes = pd.read_sql("SELECT * FROM logs WHERE status='Pendiente'", conn)
         if not pendientes.empty:
-            st.subheader("🔔 Alimentos Pendientes")
+            st.subheader("🔔 Alimentos Pendientes por Clasificar")
+            
+            # Obtener categorías actuales para el selector
+            cats_existentes = pd.read_sql("SELECT DISTINCT category FROM master_food", conn)['category'].tolist()
+            
             for _, r in pendientes.iterrows():
                 with st.expander(f"🔴 {r['username']} - {r['food_desc']}"):
                     c1, c2, c3 = st.columns(3)
@@ -129,16 +131,41 @@ else:
                     c_val = c2.number_input("Carb (100g)", 0.0, key=f"c_val_{r['id']}")
                     g_val = c3.number_input("Fat (100g)", 0.0, key=f"g_val_{r['id']}")
                     
+                    # --- SECCIÓN DE CATEGORIZACIÓN ---
+                    col_cat, col_new = st.columns(2)
+                    cat_sel = col_cat.selectbox(
+                        "Clasificar en:", 
+                        [""] + sorted([c for c in cats_existentes if c]) + ["➕ Nueva Categoría"], 
+                        key=f"cat_sel_{r['id']}"
+                    )
+                    
+                    nueva_cat_nombre = ""
+                    if cat_sel == "➕ Nueva Categoría":
+                        nueva_cat_nombre = col_new.text_input("Nombre de la categoría:", key=f"new_cat_{r['id']}").strip().capitalize()
+                    
+                    categoria_final = nueva_cat_nombre if cat_sel == "➕ Nueva Categoría" else cat_sel
+
                     col_v, col_r = st.columns(2)
-                    if col_v.button("Validar", key=f"v_btn_{r['id']}"):
-                        try: gramos_atleta = float(r['food_desc'].split('g')[0])
-                        except: gramos_atleta = 100.0
-                        factor = gramos_atleta / 100
-                        k_calc = (p_val*4 + c_val*4 + g_val*9) * factor
-                        conn.execute("UPDATE logs SET prot=?, carb=?, fat=?, kcal=?, status='Validado' WHERE id=?", (p_val*factor, c_val*factor, g_val*factor, k_calc, r['id']))
-                        nombre_limpio = r['food_desc'].split(' ', 1)[1] if ' ' in r['food_desc'] else r['food_desc']
-                        conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (nombre_limpio.strip(), p_val, c_val, g_val, p_val*4+c_val*4+g_val*9, "Validado"))
-                        conn.commit(); st.rerun()
+                    if col_v.button("✅ Validar y Guardar", key=f"v_btn_{r['id']}"):
+                        if categoria_final == "":
+                            st.error("Por favor selecciona o crea una categoría.")
+                        else:
+                            try: gramos_atleta = float(r['food_desc'].split('g')[0])
+                            except: gramos_atleta = 100.0
+                            
+                            factor = gramos_atleta / 100
+                            k_calc = (p_val*4 + c_val*4 + g_val*9) * factor
+                            
+                            # Actualizar log del atleta
+                            conn.execute("UPDATE logs SET prot=?, carb=?, fat=?, kcal=?, status='Validado' WHERE id=?", 
+                                        (p_val*factor, c_val*factor, g_val*factor, k_calc, r['id']))
+                            
+                            # Guardar en maestro con su categoría
+                            nombre_limpio = r['food_desc'].split(' ', 1)[1] if ' ' in r['food_desc'] else r['food_desc']
+                            conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", 
+                                        (nombre_limpio.strip(), p_val, c_val, g_val, p_val*4+c_val*4+g_val*9, categoria_final))
+                            
+                            conn.commit(); st.success("Clasificado correctamente."); st.rerun()
                     
                     if col_r.button("🗑️ Rechazar / Borrar", key=f"del_log_{r['id']}"):
                         conn.execute("DELETE FROM logs WHERE id=?", (r['id'],))
@@ -178,9 +205,7 @@ else:
             if user_to_delete != "":
                 conn.execute("DELETE FROM users WHERE username=?", (user_to_delete,))
                 conn.execute("DELETE FROM logs WHERE username=?", (user_to_delete,))
-                conn.commit()
-                st.warning(f"Alumno '{user_to_delete}' eliminado de la base de datos.")
-                st.rerun()
+                conn.commit(); st.rerun()
         conn.close()
 
     elif menu == "Mi Diario":
@@ -188,7 +213,6 @@ else:
         m = pd.read_sql("SELECT * FROM users WHERE username=?", conn, params=(st.session_state.user,)).iloc[0]
         hoy_dt = datetime.now()
         hoy = hoy_dt.strftime('%Y-%m-%d')
-        
         dias_es = {'Monday': 'Lunes', 'Tuesday': 'Martes', 'Wednesday': 'Miércoles', 'Thursday': 'Jueves', 'Friday': 'Viernes', 'Saturday': 'Sábado', 'Sunday': 'Domingo'}
         dia_nombre = dias_es[hoy_dt.strftime('%A')]
 
@@ -205,9 +229,8 @@ else:
         
         st.divider()
         cats = pd.read_sql("SELECT DISTINCT category FROM master_food", conn)['category'].tolist()
-        c_sel = st.selectbox("Categoría:", ["Todas"] + sorted(cats))
+        c_sel = st.selectbox("Categoría:", ["Todas"] + sorted([c for c in cats if c]))
         
-        # Mejora: Consulta segura de alimentos por categoría
         if c_sel != "Todas":
             alims = pd.read_sql("SELECT food_name FROM master_food WHERE category=?", conn, params=(c_sel,))['food_name'].tolist()
         else:
@@ -272,12 +295,9 @@ else:
         if st.button("🗑️ Borrar Alimento"):
             if food_to_delete != "":
                 conn.execute("DELETE FROM master_food WHERE food_name=?", (food_to_delete,))
-                conn.commit()
-                st.success(f"Alimento '{food_to_delete}' eliminado de la base.")
-                st.rerun()
+                conn.commit(); st.rerun()
         conn.close()
 
-    # --- BOTÓN CERRAR SESIÓN MEJORADO ---
     if st.sidebar.button("🚪 Cerrar Sesión"):
         st.query_params.clear()
         for key in list(st.session_state.keys()):
