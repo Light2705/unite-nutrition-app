@@ -1,9 +1,7 @@
-
 import streamlit as st
 import pandas as pd
 import sqlite3
 import os
-import re 
 from datetime import datetime, timedelta
 
 # --- CONFIGURACIÓN DE RUTAS ---
@@ -133,7 +131,6 @@ else:
         hoy = datetime.now().strftime('%Y-%m-%d')
         hora_actual = datetime.now().hour
         
-        # Alertas de inactividad
         alumnos_check = pd.read_sql("SELECT username FROM users WHERE is_admin=0", conn)['username'].tolist()
         for alum in alumnos_check:
             reg_hoy = pd.read_sql("SELECT count(*) as total FROM logs WHERE username=? AND date=?", conn, params=(alum, hoy)).iloc[0]['total']
@@ -141,8 +138,6 @@ else:
                  st.markdown(f'<div style="color: #ff4b4b; border: 1px solid #ff4b4b; padding: 10px; border-radius: 5px; margin-bottom:10px;">⚠️ <b>{alum}</b> no ha registrado comidas hoy.</div>', unsafe_allow_html=True)
         
         st.divider()
-        
-        # Alimentos Pendientes
         pendientes = pd.read_sql("SELECT * FROM logs WHERE status='Pendiente'", conn)
         if not pendientes.empty:
             st.subheader("🔔 Alimentos Pendientes por Clasificar")
@@ -176,21 +171,16 @@ else:
                         conn.commit(); st.rerun()
 
         st.divider()
-        
-        # Gestión de Alumnos y Erick (Propio)
         usuarios_all = pd.read_sql("SELECT username as Alumno, expiry_date as Acceso_Hasta, is_admin FROM users", conn)
         sel_atleta = st.selectbox("Selecciona un usuario (Alumno o Tú mismo):", [""] + usuarios_all['Alumno'].tolist())
         
         if sel_atleta:
             m = pd.read_sql("SELECT * FROM users WHERE username=?", conn, params=(sel_atleta,)).iloc[0]
             last_bio = pd.read_sql("SELECT * FROM biometrics WHERE username=? ORDER BY date DESC LIMIT 1", conn, params=(sel_atleta,))
-            
             t_hoy, t_hist, t_cfg = st.tabs(["📊 Hoy (Desglose)", "📅 Historial", "⚙️ Configuración Plan"])
-            
             with t_hoy:
                 if not last_bio.empty:
                     st.info(f"🧬 **Peso:** {last_bio.iloc[0]['weight']}kg | **Sueño:** {last_bio.iloc[0]['sleep']}/10 | **Estrés:** {last_bio.iloc[0]['stress']}/10")
-                
                 st.write(f"🍴 **Comidas registradas por {sel_atleta} hoy:**")
                 detalles_hoy = pd.read_sql("SELECT id, food_desc as Plato, round(prot,1) as P, round(carb,1) as C, round(fat,1) as G, round(kcal,0) as Kcal FROM logs WHERE username=? AND date=?", conn, params=(sel_atleta, hoy))
                 if not detalles_hoy.empty:
@@ -201,24 +191,18 @@ else:
                     c2.metric("Total C", f"{cons_tot['C']:.1f}g", f"/{m['target_carb']}")
                     c3.metric("Total G", f"{cons_tot['G']:.1f}g", f"/{m['target_fat']}")
                     c4.metric("Total Kcal", f"{int(cons_tot['Kcal'])}", f"/{int(m['target_kcal'])}")
-                else:
-                    st.info("Sin registros el día de hoy.")
-
+                else: st.info("Sin registros el día de hoy.")
             with t_hist: mostrar_historial(sel_atleta)
-            
             with t_cfg:
                 st.subheader(f"Editar metas de {sel_atleta}")
                 if m['is_admin'] == 0:
                     dias = st.number_input("Añadir días de acceso:", 0, 30)
                     nueva_f = (datetime.strptime(m['expiry_date'], '%Y-%m-%d') + timedelta(days=dias)).strftime('%Y-%m-%d')
-                else:
-                    nueva_f = m['expiry_date']
-                
+                else: nueva_f = m['expiry_date']
                 p_o = st.number_input("P Meta", value=float(m['target_prot']))
                 c_o = st.number_input("C Meta", value=float(m['target_carb']))
                 g_o = st.number_input("G Meta", value=float(m['target_fat']))
                 k_o = st.number_input("Kcal Meta", value=float(m['target_kcal']))
-                
                 if st.button("💾 Guardar Cambios en Plan"):
                     conn.execute("UPDATE users SET expiry_date=?, target_prot=?, target_carb=?, target_fat=?, target_kcal=? WHERE username=?", (nueva_f, p_o, c_o, g_o, k_o, sel_atleta))
                     conn.commit(); st.success("¡Plan actualizado!"); st.rerun()
@@ -263,16 +247,13 @@ else:
         c4.metric("Kcal", f"{int(cons['k'])}", f"Meta: {int(m['target_kcal'])}")
         
         st.divider()
-        
-        # --- LÓGICA DE REGISTRO (PARA TODOS) ---
         st.subheader("➕ Registrar Alimento")
         cats = pd.read_sql("SELECT DISTINCT category FROM master_food", conn)['category'].tolist()
         c_sel = st.selectbox("Filtrar por Categoría:", ["Todas"] + sorted([c for c in cats if c]))
         
-        if c_sel == "Todas":
-            alims = pd.read_sql("SELECT food_name FROM master_food", conn)['food_name'].tolist()
-        else:
-            alims = pd.read_sql("SELECT food_name FROM master_food WHERE category=?", conn, params=(c_sel,))['food_name'].tolist()
+        alims_query = "SELECT food_name FROM master_food" if c_sel == "Todas" else "SELECT food_name FROM master_food WHERE category=?"
+        params_alims = (c_sel,) if c_sel != "Todas" else None
+        alims = pd.read_sql(alims_query, conn, params=params_alims)['food_name'].tolist()
         
         a_sel = st.selectbox("Selecciona Alimento:", [""] + sorted(alims) + ["➕ OTRO"])
         gramos = st.number_input("Gramos consumidos:", min_value=1.0, value=100.0)
@@ -297,34 +278,38 @@ else:
 
         st.divider()
         st.subheader("📋 Mi Consumo de Hoy")
-        tabla_hoy = pd.read_sql("SELECT food_desc as Plato, round(prot,1) as P, round(carb,1) as C, round(fat,1) as G, round(kcal,0) as Kcal, status as Estado FROM logs WHERE username=? AND date=?", conn, params=(st.session_state.user, hoy))
-        st.dataframe(tabla_hoy, use_container_width=True, hide_index=True)
+        tabla_hoy = pd.read_sql("SELECT id, food_desc as Plato, round(prot,1) as P, round(carb,1) as C, round(fat,1) as G, round(kcal,0) as Kcal, status as Estado FROM logs WHERE username=? AND date=?", conn, params=(st.session_state.user, hoy))
+        
+        if not tabla_hoy.empty:
+            st.dataframe(tabla_hoy.drop(columns=['id']), use_container_width=True, hide_index=True)
+            
+            # --- AQUÍ ESTÁ TU BOTÓN DE BORRAR ---
+            col_del1, col_del2 = st.columns([2,1])
+            id_para_borrar = col_del1.selectbox("¿Te equivocaste? Selecciona el plato:", tabla_hoy['id'].tolist(), 
+                                               format_func=lambda x: tabla_hoy[tabla_hoy['id']==x]['Plato'].values[0])
+            if col_del2.button("🗑️ Borrar Alimento"):
+                conn.execute("DELETE FROM logs WHERE id=?", (id_para_borrar,))
+                conn.commit()
+                st.warning("Registro eliminado.")
+                st.rerun()
+        else: st.info("Aún no has registrado alimentos hoy.")
 
-        # --- PANEL DE EDICIÓN EXCLUSIVO PARA ERICK (COACH) ---
         if st.session_state.admin:
             with st.expander("🛠️ Panel de Edición de Registros (Solo Coach)"):
                 logs_hoy = pd.read_sql("SELECT id, food_desc FROM logs WHERE username=? AND date=?", conn, params=(st.session_state.user, hoy))
                 if not logs_hoy.empty:
-                    id_edit = st.selectbox("ID del registro a corregir:", logs_hoy['id'].tolist(), format_func=lambda x: logs_hoy[logs_hoy['id']==x]['food_desc'].values[0])
+                    id_edit = st.selectbox("ID del registro a corregir:", logs_hoy['id'].tolist(), format_func=lambda x: logs_hoy[logs_hoy['id']==x]['food_desc'].values[0], key="coach_edit_select")
                     log_data = pd.read_sql("SELECT * FROM logs WHERE id=?", conn, params=(id_edit,)).iloc[0]
-                    
                     with st.form("coach_edit_form"):
                         e_desc = st.text_input("Descripción", value=log_data['food_desc'])
                         c_e1, c_e2, c_e3 = st.columns(3)
                         e_p = c_e1.number_input("P (g)", value=float(log_data['prot']))
                         e_c = c_e2.number_input("C (g)", value=float(log_data['carb']))
                         e_g = c_e3.number_input("G (g)", value=float(log_data['fat']))
-                        
                         if st.form_submit_button("💾 Guardar Corrección"):
                             e_k = (e_p * 4) + (e_c * 4) + (e_g * 9)
                             conn.execute("UPDATE logs SET food_desc=?, prot=?, carb=?, fat=?, kcal=?, status='Validado' WHERE id=?", (e_desc, e_p, e_c, e_g, e_k, id_edit))
                             conn.commit(); st.success("Registro corregido."); st.rerun()
-                    
-                    if st.button("🗑️ Eliminar Registro"):
-                        conn.execute("DELETE FROM logs WHERE id=?", (id_edit,))
-                        conn.commit(); st.rerun()
-                else:
-                    st.info("El alumno no ha registrado nada hoy.")
         conn.close()
 
     elif menu == "Historial": mostrar_historial(st.session_state.user)
@@ -344,7 +329,6 @@ else:
         conn = sqlite3.connect(DB_PATH)
         base_actual = pd.read_sql("SELECT food_name as Alimento, category as Categoría, p100 as Prot, c100 as Carb, g100 as Fat FROM master_food", conn)
         st.dataframe(base_actual, use_container_width=True, hide_index=True)
-        
         st.subheader("✏️ Editar Macros Maestros")
         alim_a_editar = st.selectbox("Selecciona alimento:", [""] + base_actual['Alimento'].tolist())
         if alim_a_editar:
@@ -361,12 +345,6 @@ else:
                     if ed_nombre != datos_alim['food_name']: conn.execute("DELETE FROM master_food WHERE food_name=?", (datos_alim['food_name'],))
                     conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (ed_nombre.strip(), ed_p, ed_c, ed_g, ed_k, ed_cat.strip().capitalize()))
                     conn.commit(); st.rerun()
-        
-        food_to_delete = st.selectbox("Eliminar alimento de la base:", [""] + base_actual['Alimento'].tolist(), key="del_food")
-        if st.button("🗑️ Eliminar"):
-            if food_to_delete != "":
-                conn.execute("DELETE FROM master_food WHERE food_name=?", (food_to_delete,))
-                conn.commit(); st.rerun()
         conn.close()
 
     if st.sidebar.button("🚪 Cerrar Sesión"):
