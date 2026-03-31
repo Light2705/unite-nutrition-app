@@ -102,28 +102,17 @@ else:
     if st.session_state.admin: opciones = ["Gestión de Clientes", "Maestro de Alimentos", "Mi Diario", "Historial"]
     menu = st.sidebar.radio("Navegación", opciones)
 
-    # --- FUNCIÓN COMPARTIDA DE HISTORIAL (ACTUALIZADA CON GRÁFICA) ---
+    # --- FUNCIÓN COMPARTIDA DE HISTORIAL ---
     def mostrar_historial(usuario):
-        st.subheader(f"📅 Reporte de Progreso: {usuario}")
+        st.subheader(f"📅 Últimos 7 días registrados: {usuario}")
         conn = sqlite3.connect(DB_PATH)
         dias_es = {'Monday': 'Lunes', 'Tuesday': 'Martes', 'Wednesday': 'Miércoles', 'Thursday': 'Jueves', 'Friday': 'Viernes', 'Saturday': 'Sábado', 'Sunday': 'Domingo'}
-        
-        # Query de Macros
-        query = "SELECT date as Fecha, round(SUM(prot),1) as P_Total, round(SUM(carb),1) as C_Total, round(SUM(fat),1) as G_Total, round(SUM(kcal),0) as Kcal_Total FROM logs WHERE username=? GROUP BY date ORDER BY date DESC LIMIT 14"
+        query = "SELECT date as Fecha, round(SUM(prot),1) as P_Total, round(SUM(carb),1) as C_Total, round(SUM(fat),1) as G_Total, round(SUM(kcal),0) as Kcal_Total FROM logs WHERE username=? GROUP BY date ORDER BY date DESC LIMIT 7"
         df = pd.read_sql(query, conn, params=(usuario,))
         
-        # Query de Biometría
-        df_bio = pd.read_sql("SELECT date as Fecha, weight as Peso FROM biometrics WHERE username=? ORDER BY date ASC", conn, params=(usuario,))
+        # Unimos con biometría para ver el peso en el historial
+        df_bio = pd.read_sql("SELECT date as Fecha, weight as Peso FROM biometrics WHERE username=?", conn, params=(usuario,))
         conn.close()
-
-        # --- SECCIÓN DE GRÁFICA DE PESO ---
-        if not df_bio.empty:
-            st.write("📈 **Evolución del Peso (Últimos registros)**")
-            df_chart = df_bio.copy()
-            df_chart['Fecha'] = pd.to_datetime(df_chart['Fecha']).dt.strftime('%d/%m')
-            st.line_chart(df_chart.set_index('Fecha')['Peso'])
-        
-        st.divider()
 
         if not df.empty:
             df['Fecha'] = pd.to_datetime(df['Fecha'])
@@ -133,10 +122,8 @@ else:
             
             df.insert(0, "Día", df['Fecha'].dt.day_name().map(dias_es))
             df['Fecha'] = df['Fecha'].dt.strftime('%d/%m')
-            st.write("📋 **Detalle Diario (Últimas 2 semanas)**")
             st.dataframe(df, use_container_width=True, hide_index=True)
-        else: 
-            st.info("No hay registros de alimentación en el historial.")
+        else: st.info("No hay registros en la última semana.")
 
     # --- GESTIÓN DE CLIENTES ---
     if st.session_state.admin and menu == "Gestión de Clientes":
@@ -196,9 +183,10 @@ else:
         sel_atleta = st.selectbox("Selecciona un alumno:", [""] + usuarios_lista['Alumno'].tolist())
         if sel_atleta:
             m = pd.read_sql("SELECT * FROM users WHERE username=?", conn, params=(sel_atleta,)).iloc[0]
+            # Ver última biometría registrada
             last_bio = pd.read_sql("SELECT * FROM biometrics WHERE username=? ORDER BY date DESC LIMIT 1", conn, params=(sel_atleta,))
             
-            t_hoy, t_hist, t_cfg = st.tabs(["📊 Hoy", "📅 Historial y Gráfica", "⚙️ Plan"])
+            t_hoy, t_hist, t_cfg = st.tabs(["📊 Hoy", "📅 Últimos 7 Días", "⚙️ Plan"])
             with t_hoy:
                 if not last_bio.empty:
                     st.info(f"🧬 **Último Peso:** {last_bio.iloc[0]['weight']}kg | **Sueño:** {last_bio.iloc[0]['sleep']}/10 | **Estrés:** {last_bio.iloc[0]['stress']}/10")
@@ -263,7 +251,7 @@ else:
         st.divider()
         cats = pd.read_sql("SELECT DISTINCT category FROM master_food", conn)['category'].tolist()
         c_sel = st.selectbox("Categoría:", ["Todas"] + sorted([c for c in cats if c]))
-        alims = pd.read_sql("SELECT food_name FROM master_food WHERE category=?", conn, params=(c_sel,))['food_name'].tolist() if c_s != "Todas" else pd.read_sql("SELECT food_name FROM master_food", conn)['food_name'].tolist()
+        alims = pd.read_sql("SELECT food_name FROM master_food WHERE category=?", conn, params=(c_sel,))['food_name'].tolist() if c_sel != "Todas" else pd.read_sql("SELECT food_name FROM master_food", conn)['food_name'].tolist()
         
         a_sel = st.selectbox("Alimento:", [""] + sorted(alims) + ["➕ OTRO"])
         gramos = st.number_input("Gramos (pesado):", min_value=1.0, value=100.0)
