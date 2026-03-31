@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import os
+import re  # Se añade para la validación de letras
 from datetime import datetime, timedelta
 
 # --- CONFIGURACIÓN DE RUTAS ---
@@ -269,7 +270,10 @@ else:
         
         food_f = ""
         if a_sel == "➕ OTRO": 
-            food_f = st.text_input("Escribe el nombre del alimento:").strip()
+            # --- CAMBIO AQUÍ: Filtrado de solo letras ---
+            input_food = st.text_input("Escribe el nombre del alimento:").strip()
+            # Filtra permitiendo letras (incluidas tildes/ñ) y espacios
+            food_f = re.sub(r'[^a-zA-ZáéíóúÁÉÍÓÚñÑ\s]', '', input_food)
         elif a_sel != "":
             food_f = a_sel
             pre = pd.read_sql("SELECT * FROM master_food WHERE food_name=?", conn, params=(food_f,)).iloc[0]
