@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -262,75 +263,68 @@ else:
         c4.metric("Kcal", f"{int(cons['k'])}", f"Meta: {int(m['target_kcal'])}")
         
         st.divider()
-        # --- SECCIÓN DE REGISTRO Y EDICIÓN ---
-        tab_reg, tab_edit = st.tabs(["➕ Registrar Alimento", "✏️ Editar Registros de Hoy"])
+        
+        # --- LÓGICA DE REGISTRO (PARA TODOS) ---
+        st.subheader("➕ Registrar Alimento")
+        cats = pd.read_sql("SELECT DISTINCT category FROM master_food", conn)['category'].tolist()
+        c_sel = st.selectbox("Filtrar por Categoría:", ["Todas"] + sorted([c for c in cats if c]))
+        
+        if c_sel == "Todas":
+            alims = pd.read_sql("SELECT food_name FROM master_food", conn)['food_name'].tolist()
+        else:
+            alims = pd.read_sql("SELECT food_name FROM master_food WHERE category=?", conn, params=(c_sel,))['food_name'].tolist()
+        
+        a_sel = st.selectbox("Selecciona Alimento:", [""] + sorted(alims) + ["➕ OTRO"])
+        gramos = st.number_input("Gramos consumidos:", min_value=1.0, value=100.0)
+        
+        food_f = ""
+        if a_sel == "➕ OTRO": 
+            food_f = st.text_input("Escribe el nombre del alimento:", key="food_input_text").strip()
+        elif a_sel != "":
+            food_f = a_sel
+            pre = pd.read_sql("SELECT * FROM master_food WHERE food_name=?", conn, params=(food_f,)).iloc[0]
+            st.info(f"💡 {gramos}g aportan: **P:** {pre['p100']*(gramos/100):.1f}g | **C:** {pre['c100']*(gramos/100):.1f}g | **G:** {pre['g100']*(gramos/100):.1f}g")
 
-        with tab_reg:
-            cats = pd.read_sql("SELECT DISTINCT category FROM master_food", conn)['category'].tolist()
-            c_sel = st.selectbox("Filtrar por Categoría:", ["Todas"] + sorted([c for c in cats if c]))
-            
-            if c_sel == "Todas":
-                alims = pd.read_sql("SELECT food_name FROM master_food", conn)['food_name'].tolist()
-            else:
-                alims = pd.read_sql("SELECT food_name FROM master_food WHERE category=?", conn, params=(c_sel,))['food_name'].tolist()
-            
-            a_sel = st.selectbox("Selecciona Alimento:", [""] + sorted(alims) + ["➕ OTRO"])
-            gramos = st.number_input("Gramos consumidos:", min_value=1.0, value=100.0)
-            
-            food_f = ""
-            if a_sel == "➕ OTRO": 
-                food_f = st.text_input("Escribe el nombre del alimento:", key="food_input_text").strip()
-                st.components.v1.html("""<script>var input = window.parent.document.querySelectorAll('input[type="text"]');
-                    for (var i = 0; i < input.length; i++) {
-                        if (input[i].getAttribute('aria-label') == 'Escribe el nombre del alimento:') {
-                            input[i].onkeydown = function(e) { if (e.key >= '0' && e.key <= '9') return false; };
-                        }
-                    }</script>""", height=0)
-            elif a_sel != "":
-                food_f = a_sel
-                pre = pd.read_sql("SELECT * FROM master_food WHERE food_name=?", conn, params=(food_f,)).iloc[0]
-                st.info(f"💡 {gramos}g aportan: **P:** {pre['p100']*(gramos/100):.1f}g | **C:** {pre['c100']*(gramos/100):.1f}g | **G:** {pre['g100']*(gramos/100):.1f}g")
+        if st.button("✅ Registrar Consumo"):
+            if food_f != "":
+                match = pd.read_sql("SELECT * FROM master_food WHERE LOWER(food_name) = ?", conn, params=(food_f.lower(),))
+                if not match.empty:
+                    f = match.iloc[0]; fac = gramos/100
+                    conn.execute("INSERT INTO logs (username, date, food_desc, prot, carb, fat, kcal, status) VALUES (?,?,?,?,?,?,?,?)", (st.session_state.user, hoy, f"{int(gramos)}g {f['food_name']}", f['p100']*fac, f['c100']*fac, f['g100']*fac, f['k100']*fac, 'Validado'))
+                else:
+                    conn.execute("INSERT INTO logs (username, date, food_desc, prot, carb, fat, kcal, status) VALUES (?,?,?,?,?,?,?,?)", (st.session_state.user, hoy, f"{int(gramos)}g {food_f}", 0, 0, 0, 0, 'Pendiente'))
+                conn.commit(); st.rerun()
 
-            if st.button("✅ Registrar Consumo"):
-                if food_f != "":
-                    match = pd.read_sql("SELECT * FROM master_food WHERE LOWER(food_name) = ?", conn, params=(food_f.lower(),))
-                    if not match.empty:
-                        f = match.iloc[0]; fac = gramos/100
-                        conn.execute("INSERT INTO logs (username, date, food_desc, prot, carb, fat, kcal, status) VALUES (?,?,?,?,?,?,?,?)", (st.session_state.user, hoy, f"{int(gramos)}g {f['food_name']}", f['p100']*fac, f['c100']*fac, f['g100']*fac, f['k100']*fac, 'Validado'))
-                    else:
-                        conn.execute("INSERT INTO logs (username, date, food_desc, prot, carb, fat, kcal, status) VALUES (?,?,?,?,?,?,?,?)", (st.session_state.user, hoy, f"{int(gramos)}g {food_f}", 0, 0, 0, 0, 'Pendiente'))
-                    conn.commit(); st.rerun()
+        st.divider()
+        st.subheader("📋 Mi Consumo de Hoy")
+        tabla_hoy = pd.read_sql("SELECT food_desc as Plato, round(prot,1) as P, round(carb,1) as C, round(fat,1) as G, round(kcal,0) as Kcal, status as Estado FROM logs WHERE username=? AND date=?", conn, params=(st.session_state.user, hoy))
+        st.dataframe(tabla_hoy, use_container_width=True, hide_index=True)
 
-        with tab_edit:
-            tabla_hoy = pd.read_sql("SELECT id, food_desc as Plato, round(prot,1) as P, round(carb,1) as C, round(fat,1) as G, round(kcal,0) as Kcal FROM logs WHERE username=? AND date=?", conn, params=(st.session_state.user, hoy))
-            if not tabla_hoy.empty:
-                st.write("Selecciona un registro para modificarlo:")
-                st.dataframe(tabla_hoy, use_container_width=True, hide_index=True)
-                
-                id_a_editar = st.selectbox("ID del registro a editar/borrar:", tabla_hoy['id'].tolist())
-                log_data = pd.read_sql("SELECT * FROM logs WHERE id=?", conn, params=(id_a_editar,)).iloc[0]
-                
-                with st.form("form_edicion_diario"):
-                    col_f1, col_f2 = st.columns([2, 1])
-                    edit_desc = col_f1.text_input("Descripción", value=log_data['food_desc'])
-                    edit_status = col_f2.selectbox("Estado", ["Validado", "Pendiente"], index=0 if log_data['status']=="Validado" else 1)
+        # --- PANEL DE EDICIÓN EXCLUSIVO PARA ERICK (COACH) ---
+        if st.session_state.admin:
+            with st.expander("🛠️ Panel de Edición de Registros (Solo Coach)"):
+                logs_hoy = pd.read_sql("SELECT id, food_desc FROM logs WHERE username=? AND date=?", conn, params=(st.session_state.user, hoy))
+                if not logs_hoy.empty:
+                    id_edit = st.selectbox("ID del registro a corregir:", logs_hoy['id'].tolist(), format_func=lambda x: logs_hoy[logs_hoy['id']==x]['food_desc'].values[0])
+                    log_data = pd.read_sql("SELECT * FROM logs WHERE id=?", conn, params=(id_edit,)).iloc[0]
                     
-                    c_e1, c_e2, c_e3 = st.columns(3)
-                    edit_p = c_e1.number_input("Proteína (g)", value=float(log_data['prot']))
-                    edit_c = c_e2.number_input("Carbos (g)", value=float(log_data['carb']))
-                    edit_g = c_e3.number_input("Grasas (g)", value=float(log_data['fat']))
+                    with st.form("coach_edit_form"):
+                        e_desc = st.text_input("Descripción", value=log_data['food_desc'])
+                        c_e1, c_e2, c_e3 = st.columns(3)
+                        e_p = c_e1.number_input("P (g)", value=float(log_data['prot']))
+                        e_c = c_e2.number_input("C (g)", value=float(log_data['carb']))
+                        e_g = c_e3.number_input("G (g)", value=float(log_data['fat']))
+                        
+                        if st.form_submit_button("💾 Guardar Corrección"):
+                            e_k = (e_p * 4) + (e_c * 4) + (e_g * 9)
+                            conn.execute("UPDATE logs SET food_desc=?, prot=?, carb=?, fat=?, kcal=?, status='Validado' WHERE id=?", (e_desc, e_p, e_c, e_g, e_k, id_edit))
+                            conn.commit(); st.success("Registro corregido."); st.rerun()
                     
-                    if st.form_submit_button("💾 Actualizar Registro"):
-                        edit_k = (edit_p * 4) + (edit_c * 4) + (edit_g * 9)
-                        conn.execute("UPDATE logs SET food_desc=?, prot=?, carb=?, fat=?, kcal=?, status=? WHERE id=?", 
-                                     (edit_desc, edit_p, edit_c, edit_g, edit_k, edit_status, id_a_editar))
-                        conn.commit(); st.success("Registro actualizado."); st.rerun()
-                
-                if st.button("🗑️ Eliminar permanentemente"):
-                    conn.execute("DELETE FROM logs WHERE id=?", (id_a_editar,))
-                    conn.commit(); st.rerun()
-            else:
-                st.info("No hay registros para editar hoy.")
+                    if st.button("🗑️ Eliminar Registro"):
+                        conn.execute("DELETE FROM logs WHERE id=?", (id_edit,))
+                        conn.commit(); st.rerun()
+                else:
+                    st.info("El alumno no ha registrado nada hoy.")
         conn.close()
 
     elif menu == "Historial": mostrar_historial(st.session_state.user)
