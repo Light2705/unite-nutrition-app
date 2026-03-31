@@ -141,7 +141,7 @@ else:
                     col_v, col_r = st.columns(2)
                     if col_v.button("✅ Validar y Guardar", key=f"v_btn_{r['id']}"):
                         if categoria_final == "":
-                            st.error("Selecciona una categoría.")
+                            st.error("Por favor selecciona o crea una categoría.")
                         else:
                             try: gramos_atleta = float(r['food_desc'].split('g')[0])
                             except: gramos_atleta = 100.0
@@ -150,9 +150,9 @@ else:
                             conn.execute("UPDATE logs SET prot=?, carb=?, fat=?, kcal=?, status='Validado' WHERE id=?", (p_val*factor, c_val*factor, g_val*factor, k_calc, r['id']))
                             nombre_limpio = r['food_desc'].split(' ', 1)[1] if ' ' in r['food_desc'] else r['food_desc']
                             conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (nombre_limpio.strip(), p_val, c_val, g_val, p_val*4+c_val*4+g_val*9, categoria_final))
-                            conn.commit(); st.rerun()
+                            conn.commit(); st.success("Clasificado correctamente."); st.rerun()
                     
-                    if col_r.button("🗑️ Rechazar", key=f"del_log_{r['id']}"):
+                    if col_r.button("🗑️ Rechazar / Borrar", key=f"del_log_{r['id']}"):
                         conn.execute("DELETE FROM logs WHERE id=?", (r['id'],))
                         conn.commit(); st.rerun()
 
@@ -182,15 +182,30 @@ else:
                 if st.button("💾 Actualizar Plan"):
                     conn.execute("UPDATE users SET expiry_date=?, target_prot=?, target_carb=?, target_fat=?, target_kcal=? WHERE username=?", (nueva_f, p_o, c_o, g_o, k_o, sel_atleta))
                     conn.commit(); st.success("Plan actualizado."); st.rerun()
+
+        st.divider()
+        st.subheader("⚠️ Zona de Peligro: Eliminar Alumno")
+        user_to_delete = st.selectbox("Selecciona alumno para BORRAR PERMANENTEMENTE:", [""] + usuarios_lista['Alumno'].tolist(), key="del_user")
+        if st.button("🗑️ Eliminar Alumno Definitivamente"):
+            if user_to_delete != "":
+                conn.execute("DELETE FROM users WHERE username=?", (user_to_delete,))
+                conn.execute("DELETE FROM logs WHERE username=?", (user_to_delete,))
+                conn.commit(); st.rerun()
         conn.close()
 
     elif menu == "Mi Diario":
         conn = sqlite3.connect(DB_PATH)
         m = pd.read_sql("SELECT * FROM users WHERE username=?", conn, params=(st.session_state.user,)).iloc[0]
-        hoy = datetime.now().strftime('%Y-%m-%d')
+        hoy_dt = datetime.now()
+        hoy = hoy_dt.strftime('%Y-%m-%d')
+        dias_es = {'Monday': 'Lunes', 'Tuesday': 'Martes', 'Wednesday': 'Miércoles', 'Thursday': 'Jueves', 'Friday': 'Viernes', 'Saturday': 'Sábado', 'Sunday': 'Domingo'}
+        dia_nombre = dias_es[hoy_dt.strftime('%A')]
+
         st.header(f"📓 Diario: {st.session_state.user}")
+        st.subheader(f"📅 {dia_nombre}, {hoy_dt.strftime('%d/%m/%Y')}")
         
         cons = pd.read_sql("SELECT SUM(prot) as p, SUM(carb) as c, SUM(fat) as g, SUM(kcal) as k FROM logs WHERE username=? AND date=?", conn, params=(st.session_state.user, hoy)).fillna(0).iloc[0]
+        
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Proteína", f"{cons['p']:.1f}g", f"Meta: {m['target_prot']}g")
         c2.metric("Carbos", f"{cons['c']:.1f}g", f"Meta: {m['target_carb']}g")
@@ -200,84 +215,105 @@ else:
         st.divider()
         cats = pd.read_sql("SELECT DISTINCT category FROM master_food", conn)['category'].tolist()
         c_sel = st.selectbox("Categoría:", ["Todas"] + sorted([c for c in cats if c]))
-        alims = pd.read_sql("SELECT food_name FROM master_food" + ("" if c_sel=="Todas" else " WHERE category=?"), conn, params=() if c_sel=="Todas" else (c_sel,))['food_name'].tolist()
         
+        if c_sel != "Todas":
+            alims = pd.read_sql("SELECT food_name FROM master_food WHERE category=?", conn, params=(c_sel,))['food_name'].tolist()
+        else:
+            alims = pd.read_sql("SELECT food_name FROM master_food", conn)['food_name'].tolist()
+            
         a_sel = st.selectbox("Alimento:", [""] + sorted(alims) + ["➕ OTRO"])
-        gramos = st.number_input("Gramos:", min_value=1.0, value=100.0)
+        gramos = st.number_input("Gramos (pesado):", min_value=1.0, value=100.0)
         
-        if a_sel != "" and a_sel != "➕ OTRO":
-            pre = pd.read_sql("SELECT * FROM master_food WHERE food_name=?", conn, params=(a_sel,)).iloc[0]
-            f = gramos/100
-            st.info(f"💡 {gramos}g: P:{pre['p100']*f:.1f} | C:{pre['c100']*f:.1f} | G:{pre['g100']*f:.1f} | Kcal:{int(pre['k100']*f)}")
+        food_f = ""
+        if a_sel == "➕ OTRO":
+            food_f = st.text_input("Nombre:").strip()
+        elif a_sel != "":
+            food_f = a_sel
+            pre = pd.read_sql("SELECT * FROM master_food WHERE food_name=?", conn, params=(food_f,)).iloc[0]
+            fac_v = gramos / 100
+            st.info(f"💡 {gramos}g aportan: **P:** {pre['p100']*fac_v:.1f}g | **C:** {pre['c100']*fac_v:.1f}g | **G:** {pre['g100']*fac_v:.1f}g | **Kcal:** {int(pre['k100']*fac_v)}")
 
-        if st.button("✅ Registrar") and a_sel != "":
-            food_name = st.session_state.get("on_the_fly_name", a_sel) if a_sel == "➕ OTRO" else a_sel
-            match = pd.read_sql("SELECT * FROM master_food WHERE LOWER(food_name) = ?", conn, params=(a_sel.lower(),))
+        if st.button("✅ Registrar") and (a_sel != "" or food_f != ""):
+            match = pd.read_sql("SELECT * FROM master_food WHERE LOWER(food_name) = ?", conn, params=(food_f.lower(),))
             if not match.empty:
                 f = match.iloc[0]; fac = gramos/100
                 conn.execute("INSERT INTO logs (username, date, food_desc, prot, carb, fat, kcal, status) VALUES (?,?,?,?,?,?,?,?)",
                              (st.session_state.user, hoy, f"{int(gramos)}g {f['food_name']}", f['p100']*fac, f['c100']*fac, f['g100']*fac, f['k100']*fac, 'Validado'))
             else:
-                food_f = st.text_input("Nombre del alimento:", key="on_the_fly_name")
-                if food_f:
-                    conn.execute("INSERT INTO logs (username, date, food_desc, prot, carb, fat, kcal, status) VALUES (?,?,?,?,?,?,?,?)",
-                                 (st.session_state.user, hoy, f"{int(gramos)}g {food_f}", 0, 0, 0, 0, 'Pendiente'))
+                conn.execute("INSERT INTO logs (username, date, food_desc, prot, carb, fat, kcal, status) VALUES (?,?,?,?,?,?,?,?)",
+                             (st.session_state.user, hoy, f"{int(gramos)}g {food_f}", 0, 0, 0, 0, 'Pendiente'))
             conn.commit(); st.rerun()
+
+        st.subheader("Consumo de hoy")
+        tabla_hoy = pd.read_sql("SELECT id, food_desc as Plato, round(prot,1) as P, round(carb,1) as C, round(fat,1) as G, round(kcal,0) as Kcal FROM logs WHERE username=? AND date=?", conn, params=(st.session_state.user, hoy))
+        st.dataframe(tabla_hoy, use_container_width=True, hide_index=True)
+        
+        if not tabla_hoy.empty:
+            st.write("---")
+            col_id, col_del = st.columns([2, 1])
+            id_para_borrar = col_id.selectbox("Selecciona ID para eliminar:", tabla_hoy['id'].tolist())
+            if col_del.button("🗑️ Borrar"):
+                conn.execute("DELETE FROM logs WHERE id=?", (id_para_borrar,))
+                conn.commit(); st.rerun()
         conn.close()
 
     elif menu == "Historial": mostrar_historial(st.session_state.user)
 
     elif menu == "Maestro de Alimentos":
-        st.header("📂 Maestro de Alimentos")
+        st.header("📂 Base de Alimentos")
+        archivo = st.file_uploader("Sube tu Excel (.xlsx)", type=["xlsx"])
+        if archivo and st.button("🚀 Importar"):
+            df = pd.read_excel(archivo); df.columns = [c.lower().strip() for c in df.columns]
+            conn = sqlite3.connect(DB_PATH)
+            for _, r in df.iterrows():
+                p, c, g = float(r['proteina']), float(r['carbos']), float(r['grasas'])
+                conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (str(r['nombre']).strip(), p, c, g, (p*4+c*4+g*9), str(r['categoria']).capitalize()))
+            conn.commit(); conn.close(); st.success("Base actualizada.")
+
+        st.divider()
+        st.subheader("🗑️ Administración de Base de Datos")
         conn = sqlite3.connect(DB_PATH)
+        base_actual = pd.read_sql("SELECT food_name as Alimento, category as Categoría, p100 as Prot, c100 as Carb, g100 as Fat FROM master_food", conn)
+        st.dataframe(base_actual, use_container_width=True, hide_index=True)
         
-        tab_ver, tab_editar, tab_subir = st.tabs(["🔍 Ver/Borrar", "✏️ Editar Macros", "📤 Importar Excel"])
+        # --- NUEVA FUNCIÓN: MODIFICAR ALIMENTOS ---
+        st.write("---")
+        st.subheader("✏️ Editar Macros de Alimento")
+        alim_a_editar = st.selectbox("Selecciona alimento para modificar:", [""] + base_actual['Alimento'].tolist())
         
-        with tab_ver:
-            base_actual = pd.read_sql("SELECT food_name as Alimento, category as Categoría, p100 as Prot, c100 as Carb, g100 as Fat FROM master_food", conn)
-            st.dataframe(base_actual, use_container_width=True, hide_index=True)
-            food_to_delete = st.selectbox("Selecciona un alimento para eliminar:", [""] + base_actual['Alimento'].tolist(), key="del_food")
-            if st.button("🗑️ Borrar Alimento"):
-                if food_to_delete:
-                    conn.execute("DELETE FROM master_food WHERE food_name=?", (food_to_delete,))
-                    conn.commit(); st.rerun()
-
-        with tab_editar:
-            st.subheader("Modificar valores existentes")
-            alims_lista = pd.read_sql("SELECT food_name FROM master_food ORDER BY food_name", conn)['food_name'].tolist()
-            alim_sel = st.selectbox("Selecciona alimento a editar:", [""] + alims_lista)
-            
-            if alim_sel:
-                datos = pd.read_sql("SELECT * FROM master_food WHERE food_name=?", conn, params=(alim_sel,)).iloc[0]
-                with st.form("edit_macros"):
-                    new_name = st.text_input("Nombre:", value=datos['food_name'])
-                    new_cat = st.text_input("Categoría:", value=datos['category'])
-                    c1, c2, c3 = st.columns(3)
-                    new_p = c1.number_input("Proteína/100g", value=float(datos['p100']))
-                    new_c = c2.number_input("Carbos/100g", value=float(datos['c100']))
-                    new_g = c3.number_input("Grasas/100g", value=float(datos['g100']))
+        if alim_a_editar:
+            datos_alim = pd.read_sql("SELECT * FROM master_food WHERE food_name=?", conn, params=(alim_a_editar,)).iloc[0]
+            with st.form("edit_macros_form"):
+                ed_nombre = st.text_input("Nombre del Alimento", value=datos_alim['food_name'])
+                ed_cat = st.text_input("Categoría", value=datos_alim['category'])
+                c1, c2, c3 = st.columns(3)
+                ed_p = c1.number_input("Prot / 100g", value=float(datos_alim['p100']))
+                ed_c = c2.number_input("Carb / 100g", value=float(datos_alim['c100']))
+                ed_g = c3.number_input("Fat / 100g", value=float(datos_alim['g100']))
+                
+                if st.form_submit_button("💾 Guardar Cambios"):
+                    # Recalcular Kcal
+                    ed_k = (ed_p * 4) + (ed_c * 4) + (ed_g * 9)
+                    # Si cambió el nombre, eliminamos el anterior para no duplicar (ya que food_name es PRIMARY KEY)
+                    if ed_nombre != datos_alim['food_name']:
+                        conn.execute("DELETE FROM master_food WHERE food_name=?", (datos_alim['food_name'],))
                     
-                    if st.form_submit_button("💾 Guardar Cambios"):
-                        new_k = (new_p*4) + (new_c*4) + (new_g*9)
-                        # Si cambió el nombre, borramos el viejo e insertamos el nuevo (por ser PRIMARY KEY)
-                        if new_name != datos['food_name']:
-                            conn.execute("DELETE FROM master_food WHERE food_name=?", (datos['food_name'],))
-                        
-                        conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", 
-                                    (new_name, new_p, new_c, new_g, new_k, new_cat))
-                        conn.commit(); st.success("¡Alimento actualizado!"); st.rerun()
+                    conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", 
+                                 (ed_nombre.strip(), ed_p, ed_c, ed_g, ed_k, ed_cat.strip().capitalize()))
+                    conn.commit()
+                    st.success(f"✅ {ed_nombre} actualizado correctamente.")
+                    st.rerun()
 
-        with tab_subir:
-            archivo = st.file_uploader("Sube Excel (.xlsx)", type=["xlsx"])
-            if archivo and st.button("🚀 Importar"):
-                df = pd.read_excel(archivo); df.columns = [c.lower().strip() for c in df.columns]
-                for _, r in df.iterrows():
-                    p, c, g = float(r['proteina']), float(r['carbos']), float(r['grasas'])
-                    conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (str(r['nombre']).strip(), p, c, g, (p*4+c*4+g*9), str(r['categoria']).capitalize()))
-                conn.commit(); st.success("Base actualizada.")
+        st.write("---")
+        food_to_delete = st.selectbox("Selecciona un alimento para eliminar:", [""] + base_actual['Alimento'].tolist(), key="del_food")
+        if st.button("🗑️ Borrar Alimento"):
+            if food_to_delete != "":
+                conn.execute("DELETE FROM master_food WHERE food_name=?", (food_to_delete,))
+                conn.commit(); st.rerun()
         conn.close()
 
     if st.sidebar.button("🚪 Cerrar Sesión"):
         st.query_params.clear()
-        for key in list(st.session_state.keys()): del st.session_state[key]
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
         st.rerun()
