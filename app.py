@@ -144,10 +144,11 @@ else:
             cats_existentes = pd.read_sql("SELECT DISTINCT category FROM master_food", conn)['category'].tolist()
             for _, r in pendientes.iterrows():
                 with st.expander(f"🔴 {r['username']} - {r['food_desc']}"):
-                    c1, c2, c3 = st.columns(3)
+                    c1, c2, c3, c4 = st.columns(4)
                     p_val = c1.number_input("Prot (100g)", 0.0, key=f"p_val_{r['id']}")
                     c_val = c2.number_input("Carb (100g)", 0.0, key=f"c_val_{r['id']}")
                     g_val = c3.number_input("Fat (100g)", 0.0, key=f"g_val_{r['id']}")
+                    k_val = c4.number_input("Kcal (100g)", 0.0, key=f"k_val_{r['id']}") # <--- Kcal Manual en Pendientes
                     col_cat, col_new = st.columns(2)
                     cat_sel = col_cat.selectbox("Clasificar en:", [""] + sorted([c for c in cats_existentes if c]) + ["➕ Nueva Categoría"], key=f"cat_sel_{r['id']}")
                     nueva_cat_nombre = ""
@@ -161,10 +162,9 @@ else:
                             try: gramos_atleta = float(r['food_desc'].split('g')[0])
                             except: gramos_atleta = 100.0
                             factor = gramos_atleta / 100
-                            k_calc = (p_val*4 + c_val*4 + g_val*9) * factor
-                            conn.execute("UPDATE logs SET prot=?, carb=?, fat=?, kcal=?, status='Validado' WHERE id=?", (p_val*factor, c_val*factor, g_val*factor, k_calc, r['id']))
+                            conn.execute("UPDATE logs SET prot=?, carb=?, fat=?, kcal=?, status='Validado' WHERE id=?", (p_val*factor, c_val*factor, g_val*factor, k_val*factor, r['id']))
                             nombre_limpio = r['food_desc'].split(' ', 1)[1] if ' ' in r['food_desc'] else r['food_desc']
-                            conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (nombre_limpio.strip(), p_val, c_val, g_val, p_val*4+c_val*4+g_val*9, categoria_final))
+                            conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (nombre_limpio.strip(), p_val, c_val, g_val, k_val, categoria_final))
                             conn.commit(); st.rerun()
                     if col_r.button("🗑️ Borrar", key=f"del_log_{r['id']}"):
                         conn.execute("DELETE FROM logs WHERE id=?", (r['id'],))
@@ -283,7 +283,6 @@ else:
         if not tabla_hoy.empty:
             st.dataframe(tabla_hoy.drop(columns=['id']), use_container_width=True, hide_index=True)
             
-            # --- AQUÍ ESTÁ TU BOTÓN DE BORRAR ---
             col_del1, col_del2 = st.columns([2,1])
             id_para_borrar = col_del1.selectbox("¿Te equivocaste? Selecciona el plato:", tabla_hoy['id'].tolist(), 
                                                format_func=lambda x: tabla_hoy[tabla_hoy['id']==x]['Plato'].values[0])
@@ -302,12 +301,12 @@ else:
                     log_data = pd.read_sql("SELECT * FROM logs WHERE id=?", conn, params=(id_edit,)).iloc[0]
                     with st.form("coach_edit_form"):
                         e_desc = st.text_input("Descripción", value=log_data['food_desc'])
-                        c_e1, c_e2, c_e3 = st.columns(3)
+                        c_e1, c_e2, c_e3, c_e4 = st.columns(4)
                         e_p = c_e1.number_input("P (g)", value=float(log_data['prot']))
                         e_c = c_e2.number_input("C (g)", value=float(log_data['carb']))
                         e_g = c_e3.number_input("G (g)", value=float(log_data['fat']))
+                        e_k = c_e4.number_input("Kcal", value=float(log_data['kcal'])) # <--- Kcal Manual
                         if st.form_submit_button("💾 Guardar Corrección"):
-                            e_k = (e_p * 4) + (e_c * 4) + (e_g * 9)
                             conn.execute("UPDATE logs SET food_desc=?, prot=?, carb=?, fat=?, kcal=?, status='Validado' WHERE id=?", (e_desc, e_p, e_c, e_g, e_k, id_edit))
                             conn.commit(); st.success("Registro corregido."); st.rerun()
         conn.close()
@@ -316,18 +315,36 @@ else:
     
     elif menu == "Maestro de Alimentos":
         st.header("📂 Base de Alimentos")
-        archivo = st.file_uploader("Sube tu Excel (.xlsx)", type=["xlsx"])
-        if archivo and st.button("🚀 Importar Base"):
-            df = pd.read_excel(archivo); df.columns = [c.lower().strip() for c in df.columns]
-            conn = sqlite3.connect(DB_PATH)
-            for _, r in df.iterrows():
-                p, c, g = float(r['proteina']), float(r['carbos']), float(r['grasas'])
-                conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (str(r['nombre']).strip(), p, c, g, (p*4+c*4+g*9), str(r['categoria']).capitalize()))
-            conn.commit(); conn.close(); st.success("Base actualizada.")
+        with st.expander("📥 Importar desde Excel"):
+            archivo = st.file_uploader("Sube tu Excel (.xlsx)", type=["xlsx"])
+            if archivo and st.button("🚀 Importar Base"):
+                df = pd.read_excel(archivo); df.columns = [c.lower().strip() for c in df.columns]
+                conn = sqlite3.connect(DB_PATH)
+                for _, r in df.iterrows():
+                    p, c, g = float(r['proteina']), float(r['carbos']), float(r['grasas'])
+                    conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (str(r['nombre']).strip(), p, c, g, (p*4+c*4+g*9), str(r['categoria']).capitalize()))
+                conn.commit(); conn.close(); st.success("Base actualizada.")
         
         st.divider()
+        st.subheader("➕ Agregar Nuevo Alimento")
+        with st.form("add_new_food_form"):
+            new_nombre = st.text_input("Nombre del Alimento")
+            new_cat = st.text_input("Categoría")
+            c1, c2, c3, c4 = st.columns(4)
+            new_p = c1.number_input("P/100g", 0.0)
+            new_c = c2.number_input("C/100g", 0.0)
+            new_g = c3.number_input("G/100g", 0.0)
+            new_k = c4.number_input("Kcal/100g (Manual)", 0.0) # <--- Requerimiento: Kcal Manual
+            if st.form_submit_button("⭐ Registrar Alimento"):
+                if new_nombre.strip() == "": st.error("El nombre es obligatorio.")
+                else:
+                    conn = sqlite3.connect(DB_PATH)
+                    conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (new_nombre.strip(), new_p, new_c, new_g, new_k, new_cat.strip().capitalize()))
+                    conn.commit(); conn.close(); st.success("Agregado."); st.rerun()
+
+        st.divider()
         conn = sqlite3.connect(DB_PATH)
-        base_actual = pd.read_sql("SELECT food_name as Alimento, category as Categoría, p100 as Prot, c100 as Carb, g100 as Fat FROM master_food", conn)
+        base_actual = pd.read_sql("SELECT food_name as Alimento, category as Categoría, p100 as Prot, c100 as Carb, g100 as Fat, k100 as Kcal FROM master_food", conn)
         st.dataframe(base_actual, use_container_width=True, hide_index=True)
         st.subheader("✏️ Editar Macros Maestros")
         alim_a_editar = st.selectbox("Selecciona alimento:", [""] + base_actual['Alimento'].tolist())
@@ -336,12 +353,12 @@ else:
             with st.form("edit_macros_form"):
                 ed_nombre = st.text_input("Nombre", value=datos_alim['food_name'])
                 ed_cat = st.text_input("Categoría", value=datos_alim['category'])
-                c1, c2, c3 = st.columns(3)
+                c1, c2, c3, c4 = st.columns(4)
                 ed_p = c1.number_input("P/100g", value=float(datos_alim['p100']))
                 ed_c = c2.number_input("C/100g", value=float(datos_alim['c100']))
                 ed_g = c3.number_input("G/100g", value=float(datos_alim['g100']))
+                ed_k = c4.number_input("Kcal/100g (Manual)", value=float(datos_alim['k100'])) # <--- Requerimiento: Kcal Manual
                 if st.form_submit_button("💾 Guardar"):
-                    ed_k = (ed_p * 4) + (ed_c * 4) + (ed_g * 9)
                     if ed_nombre != datos_alim['food_name']: conn.execute("DELETE FROM master_food WHERE food_name=?", (datos_alim['food_name'],))
                     conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (ed_nombre.strip(), ed_p, ed_c, ed_g, ed_k, ed_cat.strip().capitalize()))
                     conn.commit(); st.rerun()
