@@ -2,7 +2,15 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import os
+import re
 from datetime import datetime, timedelta
+
+# --- FUNCIÓN DE VALIDACIÓN (SOLO LETRAS) ---
+def validar_solo_letras(texto):
+    if re.search(r'\d', texto):
+        st.error("❌ No se permiten números en este campo.")
+        return False
+    return True
 
 # --- CONFIGURACIÓN DE RUTAS ---
 if os.path.exists(os.path.join(os.path.expanduser("~"), "Downloads")):
@@ -72,12 +80,12 @@ if 'user' not in st.session_state:
                 st.error("Credenciales incorrectas.")
     
     with tab_reg:
-        nu = st.text_input("Nuevo Usuario", key="reg_u")
+        nu = st.text_input("Nuevo Usuario (Sin números)", key="reg_u")
         np = st.text_input("Nueva Contraseña", type="password", key="reg_p")
         if st.button("Crear Cuenta"):
             if nu.strip() == "" or np.strip() == "":
                 st.error("❌ El usuario y la contraseña no pueden estar vacíos.")
-            else:
+            elif validar_solo_letras(nu): # <--- BLOQUEO DE NÚMEROS AQUÍ
                 conn = sqlite3.connect(DB_PATH)
                 venc_bloqueado = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
                 try:
@@ -148,7 +156,7 @@ else:
                     p_val = c1.number_input("Prot (100g)", 0.0, key=f"p_val_{r['id']}")
                     c_val = c2.number_input("Carb (100g)", 0.0, key=f"c_val_{r['id']}")
                     g_val = c3.number_input("Fat (100g)", 0.0, key=f"g_val_{r['id']}")
-                    k_val = c4.number_input("Kcal (100g)", 0.0, key=f"k_val_{r['id']}") # <--- Kcal Manual en Pendientes
+                    k_val = c4.number_input("Kcal (100g)", 0.0, key=f"k_val_{r['id']}")
                     col_cat, col_new = st.columns(2)
                     cat_sel = col_cat.selectbox("Clasificar en:", [""] + sorted([c for c in cats_existentes if c]) + ["➕ Nueva Categoría"], key=f"cat_sel_{r['id']}")
                     nueva_cat_nombre = ""
@@ -305,7 +313,7 @@ else:
                         e_p = c_e1.number_input("P (g)", value=float(log_data['prot']))
                         e_c = c_e2.number_input("C (g)", value=float(log_data['carb']))
                         e_g = c_e3.number_input("G (g)", value=float(log_data['fat']))
-                        e_k = c_e4.number_input("Kcal", value=float(log_data['kcal'])) # <--- Kcal Manual
+                        e_k = c_e4.number_input("Kcal", value=float(log_data['kcal']))
                         if st.form_submit_button("💾 Guardar Corrección"):
                             conn.execute("UPDATE logs SET food_desc=?, prot=?, carb=?, fat=?, kcal=?, status='Validado' WHERE id=?", (e_desc, e_p, e_c, e_g, e_k, id_edit))
                             conn.commit(); st.success("Registro corregido."); st.rerun()
@@ -328,16 +336,16 @@ else:
         st.divider()
         st.subheader("➕ Agregar Nuevo Alimento")
         with st.form("add_new_food_form"):
-            new_nombre = st.text_input("Nombre del Alimento")
+            new_nombre = st.text_input("Nombre del Alimento (Sin números)")
             new_cat = st.text_input("Categoría")
             c1, c2, c3, c4 = st.columns(4)
             new_p = c1.number_input("P/100g", 0.0)
             new_c = c2.number_input("C/100g", 0.0)
             new_g = c3.number_input("G/100g", 0.0)
-            new_k = c4.number_input("Kcal/100g (Manual)", 0.0) # <--- Requerimiento: Kcal Manual
+            new_k = c4.number_input("Kcal/100g (Manual)", 0.0)
             if st.form_submit_button("⭐ Registrar Alimento"):
                 if new_nombre.strip() == "": st.error("El nombre es obligatorio.")
-                else:
+                elif validar_solo_letras(new_nombre): # <--- BLOQUEO DE NÚMEROS AQUÍ
                     conn = sqlite3.connect(DB_PATH)
                     conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (new_nombre.strip(), new_p, new_c, new_g, new_k, new_cat.strip().capitalize()))
                     conn.commit(); conn.close(); st.success("Agregado."); st.rerun()
@@ -351,17 +359,18 @@ else:
         if alim_a_editar:
             datos_alim = pd.read_sql("SELECT * FROM master_food WHERE food_name=?", conn, params=(alim_a_editar,)).iloc[0]
             with st.form("edit_macros_form"):
-                ed_nombre = st.text_input("Nombre", value=datos_alim['food_name'])
+                ed_nombre = st.text_input("Nombre (Sin números)", value=datos_alim['food_name'])
                 ed_cat = st.text_input("Categoría", value=datos_alim['category'])
                 c1, c2, c3, c4 = st.columns(4)
                 ed_p = c1.number_input("P/100g", value=float(datos_alim['p100']))
                 ed_c = c2.number_input("C/100g", value=float(datos_alim['c100']))
                 ed_g = c3.number_input("G/100g", value=float(datos_alim['g100']))
-                ed_k = c4.number_input("Kcal/100g (Manual)", value=float(datos_alim['k100'])) # <--- Requerimiento: Kcal Manual
+                ed_k = c4.number_input("Kcal/100g (Manual)", value=float(datos_alim['k100']))
                 if st.form_submit_button("💾 Guardar"):
-                    if ed_nombre != datos_alim['food_name']: conn.execute("DELETE FROM master_food WHERE food_name=?", (datos_alim['food_name'],))
-                    conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (ed_nombre.strip(), ed_p, ed_c, ed_g, ed_k, ed_cat.strip().capitalize()))
-                    conn.commit(); st.rerun()
+                    if validar_solo_letras(ed_nombre): # <--- BLOQUEO DE NÚMEROS AQUÍ
+                        if ed_nombre != datos_alim['food_name']: conn.execute("DELETE FROM master_food WHERE food_name=?", (datos_alim['food_name'],))
+                        conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (ed_nombre.strip(), ed_p, ed_c, ed_g, ed_k, ed_cat.strip().capitalize()))
+                        conn.commit(); st.rerun()
         conn.close()
 
     if st.sidebar.button("🚪 Cerrar Sesión"):
