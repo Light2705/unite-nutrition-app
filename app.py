@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pd  # <--- AQUÍ ESTABA EL ERROR, YA ESTÁ ARREGLADO
+import pandas as pd
 import sqlite3
 import os
 import re
@@ -235,11 +235,25 @@ else:
         m = pd.read_sql("SELECT * FROM users WHERE username=?", conn, params=(st.session_state.user,)).iloc[0]
         hoy_dt = datetime.now()
         hoy = hoy_dt.strftime('%Y-%m-%d')
+        ayer = (hoy_dt - timedelta(days=1)).strftime('%Y-%m-%d')
         dias_es = {'Monday': 'Lunes', 'Tuesday': 'Martes', 'Wednesday': 'Miércoles', 'Thursday': 'Jueves', 'Friday': 'Viernes', 'Saturday': 'Sábado', 'Sunday': 'Domingo'}
         dia_nombre = dias_es[hoy_dt.strftime('%A')]
 
         st.header(f"📓 Diario: {st.session_state.user}")
         st.subheader(f"📅 {dia_nombre}, {hoy_dt.strftime('%d/%m/%Y')}")
+
+        # --- FUNCIÓN NUEVA: COPIAR AYER ---
+        if st.button("📋 Copiar todas las comidas de ayer"):
+            logs_ayer = pd.read_sql("SELECT * FROM logs WHERE username=? AND date=?", conn, params=(st.session_state.user, ayer))
+            if not logs_ayer.empty:
+                for _, la in logs_ayer.iterrows():
+                    conn.execute("INSERT INTO logs (username, date, food_desc, prot, carb, fat, kcal, status, meal_time) VALUES (?,?,?,?,?,?,?,?,?)",
+                                 (st.session_state.user, hoy, la['food_desc'], la['prot'], la['carb'], la['fat'], la['kcal'], la['status'], la['meal_time']))
+                conn.commit()
+                st.success("✅ Comidas de ayer copiadas a hoy.")
+                st.rerun()
+            else:
+                st.warning("No hay registros de ayer para copiar.")
         
         with st.expander("🧪 Registrar Biometría"):
             c_b1, c_b2, c_b3 = st.columns(3)
@@ -260,7 +274,7 @@ else:
         
         st.divider()
 
-        # --- SECCIÓN DE TIEMPOS DE COMIDA CON VISTA PREVIA ---
+        # --- SECCIÓN DE TIEMPOS DE COMIDA ---
         tiempos = ["Desayuno", "Almuerzo", "Cena", "Snacks"]
         
         for tiempo in tiempos:
@@ -286,7 +300,6 @@ else:
                     a_sel = st.selectbox("Alimento:", [""] + sorted(df_alims['food_name'].tolist()) + ["➕ OTRO"], key=f"alim_{tiempo}")
                     gramos = st.number_input("Gramos:", min_value=0.0, value=100.0, step=10.0, key=f"gramos_{tiempo}")
                     
-                    # LÓGICA DE VISTA PREVIA EN TIEMPO REAL
                     if a_sel != "" and a_sel != "➕ OTRO":
                         datos_f = df_alims[df_alims['food_name'] == a_sel].iloc[0]
                         factor = gramos / 100
@@ -330,7 +343,7 @@ else:
         if not tabla_hoy.empty:
             st.dataframe(tabla_hoy.drop(columns=['id']), use_container_width=True, hide_index=True)
             id_para_borrar = st.selectbox("Selecciona para borrar:", tabla_hoy['id'].tolist(), 
-                                               format_func=lambda x: f"{tabla_hoy[tabla_hoy['id']==x]['Momento'].values[0]}: {tabla_hoy[tabla_hoy['id']==x]['Plato'].values[0]}")
+                                           format_func=lambda x: f"{tabla_hoy[tabla_hoy['id']==x]['Momento'].values[0]}: {tabla_hoy[tabla_hoy['id']==x]['Plato'].values[0]}")
             if st.button("🗑️ Borrar Alimento"):
                 conn.execute("DELETE FROM logs WHERE id=?", (id_para_borrar,))
                 conn.commit(); st.warning("Registro eliminado."); st.rerun()
@@ -357,6 +370,10 @@ else:
     
     elif menu == "Maestro de Alimentos":
         st.header("📂 Base de Alimentos")
+        
+        # --- FUNCIÓN NUEVA: BUSCADOR DINÁMICO ---
+        search_term = st.text_input("🔍 Buscar alimento por nombre:", "").lower()
+        
         with st.expander("📥 Importar desde Excel"):
             archivo = st.file_uploader("Sube tu Excel (.xlsx)", type=["xlsx"])
             if archivo and st.button("🚀 Importar Base"):
@@ -386,10 +403,15 @@ else:
 
         st.divider()
         conn = sqlite3.connect(DB_PATH)
+        # Filtro de búsqueda aplicado al dataframe
         base_actual = pd.read_sql("SELECT food_name as Alimento, category as Categoría, p100 as Prot, c100 as Carb, g100 as Fat, k100 as Kcal FROM master_food", conn)
+        if search_term:
+            base_actual = base_actual[base_actual['Alimento'].str.lower().str.contains(search_term)]
+        
         st.dataframe(base_actual, use_container_width=True, hide_index=True)
+        
         st.subheader("✏️ Editar Macros Maestros")
-        alim_a_editar = st.selectbox("Selecciona alimento:", [""] + base_actual['Alimento'].tolist())
+        alim_a_editar = st.selectbox("Selecciona alimento para editar:", [""] + base_actual['Alimento'].tolist())
         if alim_a_editar:
             datos_alim = pd.read_sql("SELECT * FROM master_food WHERE food_name=?", conn, params=(alim_a_editar,)).iloc[0]
             with st.form("edit_macros_form"):
