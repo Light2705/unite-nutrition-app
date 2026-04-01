@@ -1,5 +1,5 @@
 import streamlit as st
-import pd as pd
+import pandas as pd  # <--- AQUÍ ESTABA EL ERROR, YA ESTÁ ARREGLADO
 import sqlite3
 import os
 import re
