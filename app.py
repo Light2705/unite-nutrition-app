@@ -375,7 +375,24 @@ else:
                 if not logs_hoy.empty:
                     id_edit = st.selectbox("ID del registro a corregir:", logs_hoy['id'].tolist(), format_func=lambda x: logs_hoy[logs_hoy['id']==x]['food_desc'].values[0], key="coach_edit_select")
                     log_data = pd.read_sql("SELECT * FROM logs WHERE id=?", conn, params=(id_edit,)).iloc[0]
+                    # ... código anterior en línea 355
+id_edit = st.selectbox("ID del registro a corregir:", logs_hoy['id'].tolist(), ...)
+log_data = pd.read_sql("SELECT * FROM logs WHERE id=?", conn, params=(id_edit,)).iloc[0]
+
+# --- AQUÍ INSERTA EL BOTÓN DE BORRADO ---
+col_del, col_space = st.columns([1, 2]) # Para que el botón no ocupe todo el ancho
+with col_del:
+    if st.button("🗑️ Borrar este registro"):
+        conn.execute("DELETE FROM logs WHERE id=?", (id_edit,))
+        conn.commit()
+        st.success("Comida eliminada correctamente")
+        st.rerun()
+# ---------------------------------------
+
+with st.form("coach_edit_form"):
+    # ... resto de tu código (línea 357 en adelante)
                     with st.form("coach_edit_form"):
+                        
                         e_desc = st.text_input("Descripción", value=log_data['food_desc'])
                         c_e1, c_e2, c_e3, c_e4 = st.columns(4)
                         e_p = c_e1.number_input("P (g)", value=float(log_data['prot']))
