@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pd
+import pd as pd
 import sqlite3
 import os
 import re
@@ -28,7 +28,6 @@ def init_db():
                  target_prot REAL, target_carb REAL, target_fat REAL, target_kcal REAL, expiry_date TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS master_food
                  (food_name TEXT PRIMARY KEY, p100 REAL, c100 REAL, g100 REAL, k100 REAL, category TEXT)''')
-    # Se añade la columna meal_time para el nuevo diseño
     try:
         c.execute("ALTER TABLE logs ADD COLUMN meal_time TEXT DEFAULT 'General'")
     except:
@@ -261,14 +260,13 @@ else:
         
         st.divider()
 
-        # --- NUEVO DISEÑO DE REGISTRO POR TIEMPO DE COMIDA ---
+        # --- SECCIÓN DE TIEMPOS DE COMIDA CON VISTA PREVIA ---
         tiempos = ["Desayuno", "Almuerzo", "Cena", "Snacks"]
         
         for tiempo in tiempos:
             with st.container():
                 st.markdown(f"### {tiempo}")
                 
-                # Mostrar lo ya registrado en este tiempo
                 logs_tiempo = pd.read_sql("SELECT id, food_desc, kcal FROM logs WHERE username=? AND date=? AND meal_time=?", 
                                          conn, params=(st.session_state.user, hoy, tiempo))
                 
@@ -277,18 +275,36 @@ else:
                     col_f.markdown(f"🍳 {row['food_desc']}")
                     col_k.markdown(f"**{int(row['kcal'])} kcal**")
                 
-                # Botón para agregar (abre un modal/expander)
                 with st.expander(f"➕ Agregar a {tiempo}"):
                     cats = pd.read_sql("SELECT DISTINCT category FROM master_food", conn)['category'].tolist()
                     c_sel = st.selectbox("Categoría:", ["Todas"] + sorted([c for c in cats if c]), key=f"cat_{tiempo}")
                     
-                    alims_query = "SELECT food_name FROM master_food" if c_sel == "Todas" else "SELECT food_name FROM master_food WHERE category=?"
+                    alims_query = "SELECT * FROM master_food" if c_sel == "Todas" else "SELECT * FROM master_food WHERE category=?"
                     params_alims = (c_sel,) if c_sel != "Todas" else None
-                    alims = pd.read_sql(alims_query, conn, params=params_alims)['food_name'].tolist()
+                    df_alims = pd.read_sql(alims_query, conn, params=params_alims)
                     
-                    a_sel = st.selectbox("Alimento:", [""] + sorted(alims) + ["➕ OTRO"], key=f"alim_{tiempo}")
-                    gramos = st.number_input("Gramos:", min_value=1.0, value=100.0, key=f"gramos_{tiempo}")
+                    a_sel = st.selectbox("Alimento:", [""] + sorted(df_alims['food_name'].tolist()) + ["➕ OTRO"], key=f"alim_{tiempo}")
+                    gramos = st.number_input("Gramos:", min_value=0.0, value=100.0, step=10.0, key=f"gramos_{tiempo}")
                     
+                    # LÓGICA DE VISTA PREVIA EN TIEMPO REAL
+                    if a_sel != "" and a_sel != "➕ OTRO":
+                        datos_f = df_alims[df_alims['food_name'] == a_sel].iloc[0]
+                        factor = gramos / 100
+                        pv_p, pv_c, pv_g, pv_k = datos_f['p100']*factor, datos_f['c100']*factor, datos_f['g100']*factor, datos_f['k100']*factor
+                        
+                        st.markdown(f"""
+                        <div style="background-color: #262730; padding: 12px; border-radius: 8px; border-left: 4px solid #00ffcc; margin-top: 10px;">
+                            <p style="margin:0; font-size: 0.85em; color: #888;">📊 Macros para {int(gramos)}g:</p>
+                            <span style="color: #ff4b4b; font-weight: bold;">P: {pv_p:.1f}g</span> | 
+                            <span style="color: #4ba3ff; font-weight: bold;">C: {pv_c:.1f}g</span> | 
+                            <span style="color: #ffca4b; font-weight: bold;">G: {pv_g:.1f}g</span> | 
+                            <span style="color: #ffffff; font-weight: bold;">Kcal: {int(pv_k)}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    elif a_sel == "➕ OTRO":
+                        st.info("💡 Al registrar un alimento nuevo, el Coach Erick asignará los macros pronto.")
+
                     food_f = ""
                     if a_sel == "➕ OTRO": 
                         food_f = st.text_input("Nombre del alimento:", key=f"text_{tiempo}").strip()
@@ -308,7 +324,6 @@ else:
                             conn.commit(); st.rerun()
                 st.markdown("---")
 
-        # --- TABLA RESUMEN Y BORRADO (Se mantiene igual para funcionalidad) ---
         st.subheader("📋 Resumen del Día")
         tabla_hoy = pd.read_sql("SELECT id, food_desc as Plato, meal_time as Momento, round(kcal,0) as Kcal, status as Estado FROM logs WHERE username=? AND date=?", conn, params=(st.session_state.user, hoy))
         
@@ -382,9 +397,9 @@ else:
                 ed_cat = st.text_input("Categoría", value=datos_alim['category'])
                 c1, c2, c3, c4 = st.columns(4)
                 ed_p = c1.number_input("P/100g", value=float(datos_alim['p100']))
-                ed_c = c2.number_input("C/100g", value=float(datos_alim['carbos'])) # Corrección de nombre si es necesario
-                ed_g = c3.number_input("G/100g", value=float(datos_alim['grasas']))
-                ed_k = c4.number_input("Kcal/100g (Manual)", value=float(datos_alim['kcal']))
+                ed_c = c2.number_input("C/100g", value=float(datos_alim['c100']))
+                ed_g = c3.number_input("G/100g", value=float(datos_alim['g100']))
+                ed_k = c4.number_input("Kcal/100g (Manual)", value=float(datos_alim['k100']))
                 if st.form_submit_button("💾 Guardar"):
                     if validar_solo_letras(ed_nombre):
                         if ed_nombre != datos_alim['food_name']: conn.execute("DELETE FROM master_food WHERE food_name=?", (datos_alim['food_name'],))
