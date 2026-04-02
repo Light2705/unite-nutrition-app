@@ -371,12 +371,24 @@ else:
                 st.markdown("---")
 
         st.subheader("📋 Resumen del Día")
-        tabla_hoy = pd.read_sql("SELECT id, food_desc as Plato, meal_time as Momento, round(kcal,0) as Kcal, status as Estado FROM logs WHERE username=? AND date=?", conn, params=(st.session_state.user, hoy))
+        # MEJORA: Tabla resumen con desglose de macros detallado por línea
+        tabla_hoy_det = pd.read_sql("""
+            SELECT id, meal_time as Momento, food_desc as Plato, 
+            round(prot,1) as P, round(carb,1) as C, round(fat,1) as G, round(kcal,0) as Kcal 
+            FROM logs WHERE username=? AND date=?
+        """, conn, params=(st.session_state.user, hoy))
         
-        if not tabla_hoy.empty:
-            st.dataframe(tabla_hoy.drop(columns=['id']), use_container_width=True, hide_index=True)
-            id_para_borrar = st.selectbox("Selecciona para borrar:", tabla_hoy['id'].tolist(), 
-                                           format_func=lambda x: f"{tabla_hoy[tabla_hoy['id']==x]['Momento'].values[0]}: {tabla_hoy[tabla_hoy['id']==x]['Plato'].values[0]}")
+        if not tabla_hoy_det.empty:
+            st.dataframe(
+                tabla_hoy_det.drop(columns=['id']), 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "Momento": "🕒", "Plato": "Alimento", "P": "P (g)", "C": "C (g)", "G": "G (g)", "Kcal": "Kcal"
+                }
+            )
+            id_para_borrar = st.selectbox("Selecciona para borrar:", tabla_hoy_det['id'].tolist(), 
+                                           format_func=lambda x: f"{tabla_hoy_det[tabla_hoy_det['id']==x]['Momento'].values[0]}: {tabla_hoy_det[tabla_hoy_det['id']==x]['Plato'].values[0]}")
             if st.button("🗑️ Borrar Alimento"):
                 conn.execute("DELETE FROM logs WHERE id=?", (id_para_borrar,))
                 conn.commit(); st.warning("Registro eliminado."); st.rerun()
@@ -457,7 +469,9 @@ else:
                 ed_cat = st.text_input("Categoría", value=datos_alim['category'])
                 c1, c2, c3, c4 = st.columns(4)
                 ed_p = c1.number_input("P/100g", value=float(datos_alim['p100']))
-                ed_c = c2.number_input("C/100g", value=float(datos_alim['carbos'] if 'carbos' in datos_alim else datos_alim['c100']))
+                # Manejo de nombre de columna c100 o carbos según versión de DB
+                col_c = datos_alim['c100'] if 'c100' in datos_alim else datos_alim['carbos']
+                ed_c = c2.number_input("C/100g", value=float(col_c))
                 ed_g = c3.number_input("G/100g", value=float(datos_alim['g100']))
                 ed_k = c4.number_input("Kcal/100g (Manual)", value=float(datos_alim['k100']))
                 if st.form_submit_button("💾 Guardar"):
