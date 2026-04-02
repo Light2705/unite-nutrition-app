@@ -5,6 +5,11 @@ import os
 import re
 from datetime import datetime, timedelta
 
+# --- FUNCIÓN PARA OBTENER HORA LOCAL (PERÚ UTC-5) ---
+def get_local_time():
+    """Ajusta la hora de los servidores (UTC) a la hora de Perú (UTC-5)"""
+    return datetime.utcnow() - timedelta(hours=5)
+
 # --- FUNCIÓN DE VALIDACIÓN (SOLO LETRAS) ---
 def validar_solo_letras(texto):
     if re.search(r'\d', texto):
@@ -66,7 +71,8 @@ if 'user' not in st.session_state:
         conn.close()
         if not res.empty:
             vencimiento = datetime.strptime(res.iloc[0]['expiry_date'], '%Y-%m-%d')
-            if datetime.now() <= vencimiento:
+            # MEJORA: Validación con hora local
+            if get_local_time() <= vencimiento:
                 st.session_state.user = res.iloc[0]['username']
                 st.session_state.admin = res.iloc[0]['is_admin']
 
@@ -85,7 +91,8 @@ if 'user' not in st.session_state:
             conn.close()
             if not res.empty:
                 vencimiento = datetime.strptime(res.iloc[0]['expiry_date'], '%Y-%m-%d')
-                if datetime.now() <= vencimiento:
+                # MEJORA: Validación con hora local
+                if get_local_time() <= vencimiento:
                     st.session_state.user = u
                     st.session_state.admin = res.iloc[0]['is_admin']
                     st.query_params["user"] = u
@@ -103,7 +110,8 @@ if 'user' not in st.session_state:
                 st.error("❌ El usuario y la contraseña no pueden estar vacíos.")
             elif validar_solo_letras(nu):
                 conn = sqlite3.connect(DB_PATH)
-                venc_bloqueado = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+                # MEJORA: Registro de fecha con hora local
+                venc_bloqueado = (get_local_time() - timedelta(days=1)).strftime('%Y-%m-%d')
                 try:
                     conn.execute("INSERT INTO users VALUES (?, ?, 0, 0, 0, 0, 0, ?)", (nu, np, venc_bloqueado))
                     conn.commit()
@@ -157,8 +165,11 @@ else:
     if st.session_state.admin and menu == "Gestión de Clientes":
         st.header("👥 Control de Alumnos y Mis Macros")
         conn = sqlite3.connect(DB_PATH)
-        hoy = datetime.now().strftime('%Y-%m-%d')
-        hora_actual = datetime.now().hour
+        
+        # MEJORA: Uso de hora local Perú
+        hoy_dt = get_local_time()
+        hoy = hoy_dt.strftime('%Y-%m-%d')
+        hora_actual = hoy_dt.hour
         
         # Alerta de alumnos sin registro hoy
         alumnos_check = pd.read_sql("SELECT username FROM users WHERE is_admin=0", conn)['username'].tolist()
@@ -255,7 +266,9 @@ else:
     elif menu == "Mi Diario":
         conn = sqlite3.connect(DB_PATH)
         m = pd.read_sql("SELECT * FROM users WHERE username=?", conn, params=(st.session_state.user,)).iloc[0]
-        hoy_dt = datetime.now()
+        
+        # MEJORA: Cálculo de hoy y ayer usando la función de hora local Perú
+        hoy_dt = get_local_time()
         hoy = hoy_dt.strftime('%Y-%m-%d')
         ayer = (hoy_dt - timedelta(days=1)).strftime('%Y-%m-%d')
         dias_es = {'Monday': 'Lunes', 'Tuesday': 'Martes', 'Wednesday': 'Miércoles', 'Thursday': 'Jueves', 'Friday': 'Viernes', 'Saturday': 'Sábado', 'Sunday': 'Domingo'}
@@ -444,7 +457,7 @@ else:
                 ed_cat = st.text_input("Categoría", value=datos_alim['category'])
                 c1, c2, c3, c4 = st.columns(4)
                 ed_p = c1.number_input("P/100g", value=float(datos_alim['p100']))
-                ed_c = c2.number_input("C/100g", value=float(datos_alim['c100']))
+                ed_c = c2.number_input("C/100g", value=float(datos_alim['carbos'] if 'carbos' in datos_alim else datos_alim['c100']))
                 ed_g = c3.number_input("G/100g", value=float(datos_alim['g100']))
                 ed_k = c4.number_input("Kcal/100g (Manual)", value=float(datos_alim['k100']))
                 if st.form_submit_button("💾 Guardar"):
