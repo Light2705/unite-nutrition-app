@@ -485,4 +485,4 @@ else:
     if st.sidebar.button("🚪 Cerrar Sesión"):
         st.query_params.clear()
         for key in list(st.session_state.keys()): del st.session_state[key]
-        st.rerun() a este programa lo puedo hacer con IA gratis? es decir que las macros de las comidas me las de la IA el alumno sollo ponga las comidas que comio y ya 
+        st.rerun() 
