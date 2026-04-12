@@ -291,7 +291,7 @@ else:
                 a_sel = st.selectbox("Alimento:", [""] + sorted(df_alims['food_name'].tolist()) + ["➕ OTRO"], key=f"alim_{tiempo}")
                 gramos = st.number_input("Gramos:", 0.0, value=100.0, step=10.0, key=f"gr_{tiempo}")
 
-                # --- FUNCIÓN DE PREVISUALIZACIÓN DE MACROS (RESTAURADA) ---
+                # --- FUNCIÓN DE PREVISUALIZACIÓN DE MACROS ---
                 if a_sel and a_sel != "➕ OTRO":
                     f_data = df_alims[df_alims['food_name'] == a_sel].iloc[0]
                     fac = gramos / 100
@@ -324,10 +324,10 @@ else:
     elif menu == "Historial":
         mostrar_historial(st.session_state.user)
 
-    # --- Sección: Maestro de Alimentos ---
+    # --- Sección: Maestro de Alimentos (EDICIÓN Y BORRADO AGREGADO) ---
     elif menu == "Maestro de Alimentos":
         st.header("📂 Base de Alimentos")
-        search = st.text_input("🔍 Buscar:").lower()
+        search = st.text_input("🔍 Buscar alimento para editar o borrar:").lower()
         
         with st.expander("📥 Importar Excel"):
             arch = st.file_uploader("Excel (.xlsx)", type=["xlsx"])
@@ -341,18 +341,47 @@ else:
                                 (str(r['nombre']).strip(), p, c, g, (p*4+c*4+g*9), str(r['categoria']).capitalize()))
                 conn.commit(); conn.close(); st.success("Importado.")
 
+        # --- MEJORA: BUSCAR Y EDITAR/BORRAR ---
+        conn = sqlite3.connect(DB_PATH)
+        base = pd.read_sql("SELECT food_name, category, p100, c100, g100, k100 FROM master_food", conn)
+        
+        if search:
+            match_edit = base[base['food_name'].str.lower().str.contains(search, na=False)]
+            if not match_edit.empty:
+                st.subheader("📝 Editar o Eliminar Alimento Seleccionado")
+                target_food = st.selectbox("Selecciona el alimento exacto:", match_edit['food_name'].tolist())
+                f_info = match_edit[match_edit['food_name'] == target_food].iloc[0]
+                
+                with st.form("edit_master"):
+                    new_n = st.text_input("Nombre", value=f_info['food_name'])
+                    new_cat = st.text_input("Categoría", value=f_info['category'])
+                    c1,c2,c3,c4 = st.columns(4)
+                    new_p = c1.number_input("P", value=float(f_info['p100']))
+                    new_c = c2.number_input("C", value=float(f_info['c100']))
+                    new_g = c3.number_input("G", value=float(f_info['g100']))
+                    new_k = c4.number_input("Kcal", value=float(f_info['k100']))
+                    
+                    col_sav, col_del = st.columns(2)
+                    if col_sav.form_submit_button("💾 Guardar Cambios"):
+                        conn.execute("DELETE FROM master_food WHERE food_name=?", (target_food,))
+                        conn.execute("INSERT INTO master_food VALUES (?,?,?,?,?,?)", (new_n, new_p, new_c, new_g, new_k, new_cat))
+                        conn.commit(); st.success("Actualizado"); st.rerun()
+                    
+                    if col_del.form_submit_button("🗑️ Eliminar permanentemente"):
+                        conn.execute("DELETE FROM master_food WHERE food_name=?", (target_food,))
+                        conn.commit(); st.warning("Eliminado de la base de datos"); st.rerun()
+
+        st.divider()
         with st.form("nuevo_al"):
+            st.write("✨ Registrar Alimento Nuevo")
             n = st.text_input("Nombre"); cat = st.text_input("Categoría")
             c1,c2,c3,c4 = st.columns(4)
             p_n = c1.number_input("P"); c_n = c2.number_input("C"); g_n = c3.number_input("G"); k_n = c4.number_input("Kcal")
-            if st.form_submit_button("Registrar") and validar_solo_letras(n):
-                conn = sqlite3.connect(DB_PATH)
+            if st.form_submit_button("Registrar Nuevo") and validar_solo_letras(n):
                 conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (n.strip(), p_n, c_n, g_n, k_n, cat.strip().capitalize()))
-                conn.commit(); conn.close(); st.rerun()
+                conn.commit(); st.rerun()
 
-        conn = sqlite3.connect(DB_PATH)
-        base = pd.read_sql("SELECT food_name as Alimento, category as Categoría, p100, c100, g100, k100 FROM master_food", conn)
-        if search: base = base[base['Alimento'].str.lower().str.contains(search, na=False)]
+        st.write("📋 **Vista General de la Base**")
         st.dataframe(base, use_container_width=True, hide_index=True)
         conn.close()
 
