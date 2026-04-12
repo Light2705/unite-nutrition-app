@@ -225,15 +225,34 @@ else:
                     c4.metric("Kcal", f"{int(cons_tot['Kcal'])}", f"/{int(m['target_kcal'])}")
             with t_hist: mostrar_historial(sel_atleta)
             with t_cfg:
+                st.subheader("⚙️ Configuración del Perfil")
                 dias = st.number_input("Añadir días acceso:", 0, 30)
                 nueva_f = (datetime.strptime(m['expiry_date'], '%Y-%m-%d') + timedelta(days=dias)).strftime('%Y-%m-%d') if m['is_admin'] == 0 else m['expiry_date']
                 p_o = st.number_input("P Meta", value=float(m['target_prot']))
                 c_o = st.number_input("C Meta", value=float(m['target_carb']))
                 g_o = st.number_input("G Meta", value=float(m['target_fat']))
                 k_o = st.number_input("Kcal Meta", value=float(m['target_kcal']))
+                
                 if st.button("💾 Guardar Plan"):
                     conn.execute("UPDATE users SET expiry_date=?, target_prot=?, target_carb=?, target_fat=?, target_kcal=? WHERE username=?", (nueva_f, p_o, c_o, g_o, k_o, sel_atleta))
                     conn.commit(); st.success("¡Actualizado!"); st.rerun()
+                
+                st.divider()
+                st.markdown("### ⚠️ Zona de Peligro")
+                with st.expander("❌ Eliminar cuenta de este atleta"):
+                    st.warning(f"¿Estás seguro de que deseas eliminar a **{sel_atleta}**? Esta acción es irreversible.")
+                    confirmar_nombre = st.text_input(f"Para confirmar, escribe el nombre del usuario ({sel_atleta}):")
+                    
+                    if st.button(f"🔥 ELIMINAR A {sel_atleta.upper()} DEFINITIVAMENTE"):
+                        if confirmar_nombre == sel_atleta:
+                            conn.execute("DELETE FROM users WHERE username=?", (sel_atleta,))
+                            conn.execute("DELETE FROM logs WHERE username=?", (sel_atleta,))
+                            conn.execute("DELETE FROM biometrics WHERE username=?", (sel_atleta,))
+                            conn.commit()
+                            st.success(f"Atleta {sel_atleta} eliminado con éxito.")
+                            st.rerun()
+                        else:
+                            st.error("El nombre no coincide.")
         conn.close()
 
     # --- Sección: Mi Diario ---
@@ -318,17 +337,12 @@ else:
     elif menu == "Historial":
         mostrar_historial(st.session_state.user)
 
-    # --- SECCIÓN: MAESTRO DE ALIMENTOS (AQUÍ ESTÁ LA FUNCIÓN) ---
     elif menu == "Maestro de Alimentos":
         st.header("📂 Base de Alimentos")
-        
-        # --- BUSCADOR PARA ACTIVAR EDICIÓN ---
         search = st.text_input("🔍 Escribe el nombre del alimento para EDITAR o BORRAR:").lower()
-        
         conn = sqlite3.connect(DB_PATH)
         base = pd.read_sql("SELECT food_name, category, p100, c100, g100, k100 FROM master_food", conn)
         
-        # --- MEJORA: BUSCAR Y EDITAR/BORRAR (ESTA ES LA LÓGICA) ---
         if search:
             match_edit = base[base['food_name'].str.lower().str.contains(search, na=False)]
             if not match_edit.empty:
