@@ -34,16 +34,13 @@ DB_PATH = os.path.join(BASE_DIR, "unite_nutrition_vFinal.db")
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # Tabla de Usuarios
     c.execute('''CREATE TABLE IF NOT EXISTS users  
                  (username TEXT PRIMARY KEY, password TEXT, is_admin INTEGER, 
                  target_prot REAL, target_carb REAL, target_fat REAL, target_kcal REAL, expiry_date TEXT)''')
     
-    # Tabla Maestro de Alimentos
     c.execute('''CREATE TABLE IF NOT EXISTS master_food
                  (food_name TEXT PRIMARY KEY, p100 REAL, c100 REAL, g100 REAL, k100 REAL, category TEXT)''')
     
-    # Tabla de Logs (Consumo diario)
     c.execute('''CREATE TABLE IF NOT EXISTS logs 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, date TEXT, 
                  food_desc TEXT, prot REAL, carb REAL, fat REAL, kcal REAL, status TEXT, meal_time TEXT)''')
@@ -211,7 +208,6 @@ else:
                             conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (nombre_limpio.strip(), p_val, c_val, g_val, k_val, categoria_final))
                             conn.commit(); st.rerun()
 
-        # Selector de detalles por alumno
         usuarios_all = pd.read_sql("SELECT username as Alumno, expiry_date as Acceso_Hasta, is_admin FROM users", conn)
         sel_atleta = st.selectbox("Selecciona un usuario:", [""] + usuarios_all['Alumno'].tolist())
         if sel_atleta:
@@ -291,7 +287,6 @@ else:
                 a_sel = st.selectbox("Alimento:", [""] + sorted(df_alims['food_name'].tolist()) + ["➕ OTRO"], key=f"alim_{tiempo}")
                 gramos = st.number_input("Gramos:", 0.0, value=100.0, step=10.0, key=f"gr_{tiempo}")
 
-                # --- FUNCIÓN DE PREVISUALIZACIÓN DE MACROS ---
                 if a_sel and a_sel != "➕ OTRO":
                     f_data = df_alims[df_alims['food_name'] == a_sel].iloc[0]
                     fac = gramos / 100
@@ -320,39 +315,29 @@ else:
                 conn.commit(); st.rerun()
         conn.close()
 
-    # --- Sección: Historial ---
     elif menu == "Historial":
         mostrar_historial(st.session_state.user)
 
-    # --- Sección: Maestro de Alimentos (EDICIÓN Y BORRADO AGREGADO) ---
+    # --- SECCIÓN: MAESTRO DE ALIMENTOS (AQUÍ ESTÁ LA FUNCIÓN) ---
     elif menu == "Maestro de Alimentos":
         st.header("📂 Base de Alimentos")
-        search = st.text_input("🔍 Buscar alimento para editar o borrar:").lower()
         
-        with st.expander("📥 Importar Excel"):
-            arch = st.file_uploader("Excel (.xlsx)", type=["xlsx"])
-            if arch and st.button("Importar"):
-                df_imp = pd.read_excel(arch)
-                df_imp.columns = [c.lower().strip() for c in df_imp.columns]
-                conn = sqlite3.connect(DB_PATH)
-                for _, r in df_imp.iterrows():
-                    p, c, g = float(r['proteina']), float(r['carbos']), float(r['grasas'])
-                    conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", 
-                                (str(r['nombre']).strip(), p, c, g, (p*4+c*4+g*9), str(r['categoria']).capitalize()))
-                conn.commit(); conn.close(); st.success("Importado.")
-
-        # --- MEJORA: BUSCAR Y EDITAR/BORRAR ---
+        # --- BUSCADOR PARA ACTIVAR EDICIÓN ---
+        search = st.text_input("🔍 Escribe el nombre del alimento para EDITAR o BORRAR:").lower()
+        
         conn = sqlite3.connect(DB_PATH)
         base = pd.read_sql("SELECT food_name, category, p100, c100, g100, k100 FROM master_food", conn)
         
+        # --- MEJORA: BUSCAR Y EDITAR/BORRAR (ESTA ES LA LÓGICA) ---
         if search:
             match_edit = base[base['food_name'].str.lower().str.contains(search, na=False)]
             if not match_edit.empty:
-                st.subheader("📝 Editar o Eliminar Alimento Seleccionado")
-                target_food = st.selectbox("Selecciona el alimento exacto:", match_edit['food_name'].tolist())
+                st.info("🎯 Selecciona un alimento de los resultados para modificarlo.")
+                target_food = st.selectbox("Alimentos encontrados:", match_edit['food_name'].tolist())
                 f_info = match_edit[match_edit['food_name'] == target_food].iloc[0]
                 
-                with st.form("edit_master"):
+                with st.form("edit_master_form"):
+                    st.write(f"✍️ Editando: **{target_food}**")
                     new_n = st.text_input("Nombre", value=f_info['food_name'])
                     new_cat = st.text_input("Categoría", value=f_info['category'])
                     c1,c2,c3,c4 = st.columns(4)
@@ -362,30 +347,41 @@ else:
                     new_k = c4.number_input("Kcal", value=float(f_info['k100']))
                     
                     col_sav, col_del = st.columns(2)
-                    if col_sav.form_submit_button("💾 Guardar Cambios"):
+                    if col_sav.form_submit_button("💾 Actualizar Alimento"):
                         conn.execute("DELETE FROM master_food WHERE food_name=?", (target_food,))
                         conn.execute("INSERT INTO master_food VALUES (?,?,?,?,?,?)", (new_n, new_p, new_c, new_g, new_k, new_cat))
-                        conn.commit(); st.success("Actualizado"); st.rerun()
+                        conn.commit(); st.success("¡Alimento actualizado correctamente!"); st.rerun()
                     
-                    if col_del.form_submit_button("🗑️ Eliminar permanentemente"):
+                    if col_del.form_submit_button("🗑️ BORRAR DE LA BASE"):
                         conn.execute("DELETE FROM master_food WHERE food_name=?", (target_food,))
-                        conn.commit(); st.warning("Eliminado de la base de datos"); st.rerun()
-
+                        conn.commit(); st.warning(f"'{target_food}' ha sido eliminado."); st.rerun()
+        
         st.divider()
+        with st.expander("📥 Importar Excel"):
+            arch = st.file_uploader("Excel (.xlsx)", type=["xlsx"])
+            if arch and st.button("Importar"):
+                df_imp = pd.read_excel(arch)
+                df_imp.columns = [c.lower().strip() for c in df_imp.columns]
+                for _, r in df_imp.iterrows():
+                    p, c, g = float(r['proteina']), float(r['carbos']), float(r['grasas'])
+                    conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", 
+                                (str(r['nombre']).strip(), p, c, g, (p*4+c*4+g*9), str(r['categoria']).capitalize()))
+                conn.commit(); st.success("Importado.")
+
         with st.form("nuevo_al"):
             st.write("✨ Registrar Alimento Nuevo")
             n = st.text_input("Nombre"); cat = st.text_input("Categoría")
             c1,c2,c3,c4 = st.columns(4)
             p_n = c1.number_input("P"); c_n = c2.number_input("C"); g_n = c3.number_input("G"); k_n = c4.number_input("Kcal")
-            if st.form_submit_button("Registrar Nuevo") and validar_solo_letras(n):
-                conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (n.strip(), p_n, c_n, g_n, k_n, cat.strip().capitalize()))
-                conn.commit(); st.rerun()
+            if st.form_submit_button("Registrar Nuevo"):
+                if n and validar_solo_letras(n):
+                    conn.execute("INSERT OR REPLACE INTO master_food VALUES (?,?,?,?,?,?)", (n.strip(), p_n, c_n, g_n, k_n, cat.strip().capitalize()))
+                    conn.commit(); st.rerun()
 
         st.write("📋 **Vista General de la Base**")
         st.dataframe(base, use_container_width=True, hide_index=True)
         conn.close()
 
-    # --- Logout ---
     if st.sidebar.button("🚪 Cerrar Sesión"):
         st.query_params.clear()
         for key in list(st.session_state.keys()): del st.session_state[key]
